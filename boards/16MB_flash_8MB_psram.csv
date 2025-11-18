@@ -1,0 +1,20 @@
+# Nom,    Type,   SousType, Offset,  Taille,   Drapeaux
+# NVS (Partition de stockage non volatile) : 0x4000 (16KB)
+nvs,      data,   nvs,      0x9000,  0x5000,
+
+# Stockage de données OTA (utilisé par le bootloader) : 0x2000 (8KB)
+otadata,  data,   ota,      0xe000,  0x2000,
+
+# Factory (Application principale/par défaut) : 0x100000 (1MB)
+factory,  app,    factory,  0x10000, 0x100000, 
+
+# Application 0 (slot OTA 0) : 0x700000 (7MB)
+app0,     app,    ota_0,    0x110000, 0x700000,
+
+# Application 1 (slot OTA 1) : 0x700000 (7MB)
+app1,     app,    ota_1,    0x810000, 0x700000,
+
+# Partition de Données (pour LittleFS/SPIFFS) : 0x0F0000 (environ 1 Mo)
+# Offset = 0x810000 (start app1) + 0x700000 (size app1) = 0xF10000
+# Taille restante = 0x1000000 (16MB total) - 0xF10000 (offset) = 0x0F0000
+storage,  data,   spiffs,   0xF10000, 0x0F0000,
