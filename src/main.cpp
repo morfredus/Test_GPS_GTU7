@@ -1,4 +1,4 @@
-// Version: 1.1.0
+// Version: 1.2.9
 // ESP32-S3 DevKitC-1 N16R8 - GPS GT-U7 Tester
 // Main Application File
 
@@ -10,6 +10,7 @@
 #include <TFT_eSPI.h>
 #include <TinyGPSPlus.h>
 #include <ArduinoJson.h>
+#include <Adafruit_NeoPixel.h>
 #include "config.h"
 #include "secrets.h"
 
@@ -21,6 +22,8 @@ TinyGPSPlus gps;
 WiFiMulti wifiMulti;
 AsyncWebServer server(WEB_SERVER_PORT);
 AsyncWebSocket ws("/ws");
+Adafruit_NeoPixel pixel(NEOPIXEL_NUM_PIXELS, PIN_NEOPIXEL, NEO_GRB + NEO_KHZ800);
+
 
 // ============================================================================
 // GLOBAL VARIABLES
@@ -37,6 +40,14 @@ bool wifiConnected = false;
 String ipAddress = "";
 bool webServerSetupDone = false;
 int connectedClients = 0;
+
+// NeoPixel status variables
+enum LedState { OFF, SOLID, BLINKING };
+LedState ledState = SOLID;
+uint32_t ledColor = NEOPIXEL_COLOR_BLUE;
+bool ledOn = true;
+unsigned long lastBlinkTime = 0;
+
 
 // GPS statistics
 uint32_t totalSentences = 0;
@@ -59,7 +70,8 @@ void drawHeader();
 void drawPageGPSData();
 void drawPageDiagnostics();
 void drawPageSatellites();
-void setLED(bool red, bool green, bool blue);
+void setLedStatus(LedState state, uint32_t color);
+void updateLed();
 void playTone(int frequency, int duration);
 void resetGPS();
 String getGPSJson();
@@ -70,6 +82,8 @@ void onWebSocketEvent(AsyncWebSocket *server, AsyncWebSocketClient *client,
 // SETUP
 // ============================================================================
 void setup() {
+  setLedStatus(SOLID, NEOPIXEL_COLOR_BLUE); // Blue during init
+
   setupPins();
   setupSerial();
   setupDisplay();
@@ -83,7 +97,6 @@ void setup() {
   DEBUG_PRINTLN("=================================");
   DEBUG_PRINTLN("Setup complete. Starting main loop...");
 
-  setLED(false, true, false);
 }
 
 // ============================================================================
@@ -93,13 +106,15 @@ void setupPins() {
   pinMode(PIN_BUTTON_1, INPUT_PULLUP);
   pinMode(PIN_BUTTON_2, INPUT_PULLUP);
 
-  pinMode(PIN_LED_RED, OUTPUT);
-  pinMode(PIN_LED_GREEN, OUTPUT);
-  pinMode(PIN_LED_BLUE, OUTPUT);
-  setLED(false, false, false);
+  pixel.begin();
+  pixel.setBrightness(NEOPIXEL_BRIGHTNESS);
+  pixel.clear();
+  pixel.show();
 
-  pinMode(PIN_BUZZER, OUTPUT);
-  digitalWrite(PIN_BUZZER, LOW);
+  // Initialize LEDC for the buzzer (tone function)
+  // This prevents the "LEDC is not initialized" crash
+  ledcSetup(BUZZER_LEDC_CHANNEL, BUZZER_FREQ_FIX, 8); // Setup channel with default freq, 8-bit resolution
+  ledcAttachPin(PIN_BUZZER, BUZZER_LEDC_CHANNEL);
 
   pinMode(PIN_TFT_BL, OUTPUT);
   digitalWrite(PIN_TFT_BL, HIGH);
@@ -120,6 +135,7 @@ void setupSerial() {
 // DISPLAY SETUP
 // ============================================================================
 void setupDisplay() {
+  updateLed(); // Show blue color
   DEBUG_PRINTLN("Initializing TFT display...");
   tft.init();
   tft.setRotation(TFT_ROTATION);
@@ -136,6 +152,7 @@ void setupDisplay() {
 // GPS SETUP
 // ============================================================================
 void setupGPS() {
+  updateLed(); // Show blue color
   DEBUG_PRINTLN("Initializing GPS...");
   gpsSerial.begin(GPS_BAUD_RATE, SERIAL_8N1, PIN_GPS_RXD, PIN_GPS_TXD);
   DEBUG_PRINTF("GPS Serial initialized on RX:%d TX:%d at %d baud\n",
@@ -146,6 +163,7 @@ void setupGPS() {
 // WIFI SETUP
 // ============================================================================
 void setupWiFi() {
+  updateLed(); // Show blue color
   DEBUG_PRINTLN("Connecting to WiFi...");
 
   WiFi.mode(WIFI_STA);
@@ -174,6 +192,7 @@ void setupWebServer() {
   server.addHandler(&ws);
 
   server.on("/", HTTP_GET, [](AsyncWebServerRequest *request) {
+    DEBUG_PRINTF("Web request received from: %s\n", request->client()->remoteIP().toString().c_str());
     String html = R"rawliteral(
 <!DOCTYPE html>
 <html lang="en">
@@ -565,18 +584,19 @@ void loop() {
   // --- Gestion de la connexion WiFi (non-bloquant) ---
   if (!wifiConnected) {
     if (wifiMulti.run() == WL_CONNECTED) {
+      DEBUG_PRINTLN(">>> WiFi connection successful!");
       wifiConnected = true;
       ipAddress = WiFi.localIP().toString();
       DEBUG_PRINTLN("\nWiFi connected!");
       DEBUG_PRINT("IP address: "); DEBUG_PRINTLN(ipAddress);
       DEBUG_PRINT("Connected to: "); DEBUG_PRINTLN(WiFi.SSID());
-      setLED(false, true, false);
+      setLedStatus(BLINKING, NEOPIXEL_COLOR_GREEN); // Start searching for GPS
       playTone(BUZZER_FREQ_FIX, BUZZER_DURATION);
     } else if (millis() - wifiConnectStart > WIFI_CONNECT_TIMEOUT) {
       // Timeout de connexion
       ipAddress = "No WiFi";
       DEBUG_PRINTLN("\nWiFi connection failed (timeout)!");
-      setLED(true, false, false);
+      setLedStatus(SOLID, NEOPIXEL_COLOR_RED); // Error state
       playTone(BUZZER_FREQ_LOST, BUZZER_DURATION * 2);
       wifiConnectStart = millis(); // Évite de retenter immédiatement
     }
@@ -584,6 +604,7 @@ void loop() {
 
   // --- Initialisation du serveur web (une fois le WiFi connecté) ---
   if (wifiConnected && !webServerSetupDone) {
+    DEBUG_PRINTLN(">>> WiFi is connected, proceeding to web server setup...");
     setupWebServer();
     webServerSetupDone = true;
   }
@@ -591,6 +612,7 @@ void loop() {
   // --- Tâches principales ---
   handleButton();
   updateGPS();
+  updateLed();
   updateDisplay();
 
   // --- Mise à jour WebSocket ---
@@ -654,21 +676,18 @@ void updateGPS() {
       if (BUZZER_ENABLED) {
         playTone(BUZZER_FREQ_FIX, BUZZER_DURATION);
       }
-      setLED(false, true, false);
+      setLedStatus(SOLID, NEOPIXEL_COLOR_GREEN); // Solid Green for GPS fix
     } else {
       DEBUG_PRINTLN("GPS FIX LOST!");
       if (BUZZER_ENABLED) {
         playTone(BUZZER_FREQ_LOST, BUZZER_DURATION * 2);
       }
-      setLED(true, true, false);
+      // If WiFi is connected, blink green for searching. Otherwise, it might be an error.
+      if (wifiConnected) {
+        setLedStatus(BLINKING, NEOPIXEL_COLOR_GREEN); // Blinking Green for searching
+      }
     }
     previousFixStatus = currentFixStatus;
-  }
-
-  if (!currentFixStatus && millis() % LED_BLINK_SLOW < LED_BLINK_SLOW / 2) {
-    setLED(true, false, false);
-  } else if (!currentFixStatus) {
-    setLED(false, false, false);
   }
 }
 
@@ -931,12 +950,33 @@ void drawPageSatellites() {
 }
 
 // ============================================================================
-// LED CONTROL
+// NEOPIXEL LED CONTROL
 // ============================================================================
-void setLED(bool red, bool green, bool blue) {
-  digitalWrite(PIN_LED_RED, red ? LED_ON : LED_OFF);
-  digitalWrite(PIN_LED_GREEN, green ? LED_ON : LED_OFF);
-  digitalWrite(PIN_LED_BLUE, blue ? LED_ON : LED_OFF);
+void setLedStatus(LedState state, uint32_t color) {
+  ledState = state;
+  ledColor = color;
+  lastBlinkTime = millis(); // Reset blink timer on state change
+  ledOn = true; // Ensure LED is on when state changes
+  updateLed(); // Update immediately
+}
+
+void updateLed() {
+  switch (ledState) {
+    case SOLID:
+      pixel.setPixelColor(0, ledColor);
+      break;
+    case BLINKING:
+      if (millis() - lastBlinkTime > NEOPIXEL_BLINK_INTERVAL) {
+        ledOn = !ledOn;
+        lastBlinkTime = millis();
+      }
+      pixel.setPixelColor(0, ledOn ? ledColor : NEOPIXEL_COLOR_OFF);
+      break;
+    case OFF:
+      pixel.setPixelColor(0, NEOPIXEL_COLOR_OFF);
+      break;
+  }
+  pixel.show();
 }
 
 // ============================================================================
@@ -945,9 +985,9 @@ void setLED(bool red, bool green, bool blue) {
 void playTone(int frequency, int duration) {
   if (!BUZZER_ENABLED) return;
 
-  tone(PIN_BUZZER, frequency, duration);
-  delay(duration);
-  noTone(PIN_BUZZER);
+  ledcWriteTone(BUZZER_LEDC_CHANNEL, frequency);
+  delay(duration); // Keep the tone for the duration
+  ledcWriteTone(BUZZER_LEDC_CHANNEL, 0); // Stop the tone
 }
 
 // ============================================================================

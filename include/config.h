@@ -1,4 +1,4 @@
-// Version: 1.2.0
+// Version: 1.2.9
 // ESP32-S3 DevKitC-1 N16R8 - GPS GT-U7 Tester Configuration File
 
 #ifndef CONFIG_H
@@ -18,8 +18,9 @@
 #define PIN_LIGHT_SENSOR    6     // S3 safe ADC pin
 
 // TFT ST7789 Display (SPI) - Pins are now defined in platformio.ini
-// PIN_TFT_CS: 5, PIN_TFT_DC: 19, PIN_TFT_RST: 4, PIN_TFT_BL: 15
-// PIN_TFT_SCL: 18, PIN_TFT_MOSI: 12
+// PIN_TFT_CS: 5, PIN_TFT_DC: 19, PIN_TFT_RST: 4
+// PIN_TFT_SCL: 11, PIN_TFT_MOSI: 12
+#define PIN_TFT_BL          15    // Backlight pin, must match platformio.ini
 
 // NeoPixel RGB LED
 #define PIN_NEOPIXEL        48    // Onboard RGB LED on ESP32-S3 DevKitC-1
@@ -32,6 +33,7 @@
 
 // Buzzer
 #define PIN_BUZZER          3
+#define BUZZER_LEDC_CHANNEL 0     // LEDC channel for the buzzer (0-7)
 
 // GPS GT-U7 (UART 2)
 #define PIN_GPS_RXD         8     // Connects to GPS TX (Moved from 16 to avoid conflict with TOUCH_CS)
@@ -46,8 +48,8 @@
 // ============================================================================
 // TFT DISPLAY SETTINGS
 // ============================================================================
-#define TFT_WIDTH           240
-#define TFT_HEIGHT          320
+// TFT_WIDTH and TFT_HEIGHT are now defined in platformio.ini build_flags
+// to properly configure the TFT_eSPI library during compilation.
 #define TFT_ROTATION        0     // 0=Portrait, 1=Landscape, 2=Portrait inverted, 3=Landscape inverted
 #define TFT_BACKLIGHT_PWM   255   // 0-255, 255=full brightness
 
@@ -96,8 +98,12 @@
 // ============================================================================
 // LED SETTINGS
 // ============================================================================
-// Settings for NeoPixel are now in the NeoPixel section above.
-// The logic for colors and blinking will be handled in the main code.
+// NeoPixel status colors (used in main.cpp)
+#define NEOPIXEL_COLOR_OFF      0
+#define NEOPIXEL_COLOR_BLUE     Adafruit_NeoPixel::Color(0, 0, 255)
+#define NEOPIXEL_COLOR_GREEN    Adafruit_NeoPixel::Color(0, 255, 0)
+#define NEOPIXEL_COLOR_RED      Adafruit_NeoPixel::Color(255, 0, 0)
+#define NEOPIXEL_BLINK_INTERVAL 500 // ms for blinking
 
 // ============================================================================
 // MEMORY ALLOCATION SETTINGS
