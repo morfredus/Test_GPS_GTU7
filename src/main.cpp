@@ -1,4 +1,4 @@
-// Version: 1.2.9
+// Version: 1.2.10
 // ESP32-S3 DevKitC-1 N16R8 - GPS GT-U7 Tester
 // Main Application File
 

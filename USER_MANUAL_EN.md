@@ -1,6 +1,6 @@
 # User Manual - GPS GT-U7 Tester
 
-**Document Version:** For software v1.2.9
+**Document Version:** For software v1.2.10
 
 ## 1. Introduction
 
