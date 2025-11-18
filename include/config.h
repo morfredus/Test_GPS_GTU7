@@ -1,4 +1,4 @@
-// Version: 1.0.00-dev
+// Version: 1.2.0
 // ESP32-S3 DevKitC-1 N16R8 - GPS GT-U7 Tester Configuration File
 
 #ifndef CONFIG_H
@@ -17,18 +17,14 @@
 // Light Sensor (ADC)
 #define PIN_LIGHT_SENSOR    6     // S3 safe ADC pin
 
-// TFT ST7789 Display (SPI)
-#define PIN_TFT_CS          5     // Chip Select
-#define PIN_TFT_DC          19    // Data/Command
-#define PIN_TFT_RST         4     // Reset
-#define PIN_TFT_BL          15    // Backlight (Must be HIGH at boot)
-#define PIN_TFT_SCL         18    // SPI Clock
-#define PIN_TFT_MOSI        12    // SPI Data Out (SDA)
+// TFT ST7789 Display (SPI) - Pins are now defined in platformio.ini
+// PIN_TFT_CS: 5, PIN_TFT_DC: 19, PIN_TFT_RST: 4, PIN_TFT_BL: 15
+// PIN_TFT_SCL: 18, PIN_TFT_MOSI: 12
 
-// RGB LED (Common Cathode, LOW = ON)
-#define PIN_LED_RED         14
-#define PIN_LED_GREEN       13
-#define PIN_LED_BLUE        10
+// NeoPixel RGB LED
+#define PIN_NEOPIXEL        48    // Onboard RGB LED on ESP32-S3 DevKitC-1
+#define NEOPIXEL_NUM_PIXELS 1
+#define NEOPIXEL_BRIGHTNESS 50    // 0-255, a lower value is usually enough
 
 // Buttons (Input with pull-up)
 #define PIN_BUTTON_1        1     // Page switch button
@@ -100,13 +96,8 @@
 // ============================================================================
 // LED SETTINGS
 // ============================================================================
-// LED is common cathode: LOW = ON, HIGH = OFF
-#define LED_ON              LOW
-#define LED_OFF             HIGH
-
-// LED blink patterns (ms)
-#define LED_BLINK_FAST      250
-#define LED_BLINK_SLOW      1000
+// Settings for NeoPixel are now in the NeoPixel section above.
+// The logic for colors and blinking will be handled in the main code.
 
 // ============================================================================
 // MEMORY ALLOCATION SETTINGS
