@@ -7,7 +7,6 @@
 // ============================================================================
 // PROJECT VERSION (Semantic Versioning)
 // ============================================================================
-#define PROJECT_VERSION "1.0.00-dev"
 #define PROJECT_NAME "GPS GT-U7 Tester"
 #define GPS_MODEL "GT-U7"
 
@@ -39,8 +38,8 @@
 #define PIN_BUZZER          3
 
 // GPS GT-U7 (UART 2)
-#define PIN_GPS_RXD         16    // Connects to GPS TX
-#define PIN_GPS_TXD         17    // Connects to GPS RX
+#define PIN_GPS_RXD         8     // Connects to GPS TX (Moved from 16 to avoid conflict with TOUCH_CS)
+#define PIN_GPS_TXD         7     // Connects to GPS RX (Moved from 17)
 #define PIN_GPS_PPS         38    // Pulse Per Second
 #define GPS_BAUD_RATE       9600  // GT-U7 default baud rate
 

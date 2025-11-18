@@ -1,4 +1,4 @@
-// Version: 1.0.00-dev
+// Version: 1.1.0
 // ESP32-S3 DevKitC-1 N16R8 - GPS GT-U7 Tester
 // Main Application File
 
@@ -25,7 +25,7 @@ AsyncWebSocket ws("/ws");
 // ============================================================================
 // GLOBAL VARIABLES
 // ============================================================================
-HardwareSerial gpsSerial(2);
+HardwareSerial gpsSerial(2); // Using UART2 for GPS
 uint8_t currentPage = PAGE_GPS_DATA;
 bool lastButton1State = HIGH;
 unsigned long lastButton1Press = 0;
@@ -35,6 +35,7 @@ unsigned long gpsFixAcquiredTime = 0;
 bool previousFixStatus = false;
 bool wifiConnected = false;
 String ipAddress = "";
+bool webServerSetupDone = false;
 int connectedClients = 0;
 
 // GPS statistics
@@ -74,7 +75,6 @@ void setup() {
   setupDisplay();
   setupGPS();
   setupWiFi();
-  setupWebServer();
 
   DEBUG_PRINTLN("=================================");
   DEBUG_PRINTLN(PROJECT_NAME);
@@ -152,35 +152,11 @@ void setupWiFi() {
   wifiMulti.addAP(WIFI_SSID_1, WIFI_PASSWORD_1);
   wifiMulti.addAP(WIFI_SSID_2, WIFI_PASSWORD_2);
 
-  tft.fillScreen(TFT_COLOR_BG);
-  tft.setTextDatum(MC_DATUM);
-  tft.drawString("Connecting WiFi...", TFT_WIDTH/2, TFT_HEIGHT/2, 4);
-
-  unsigned long startAttempt = millis();
-  while (wifiMulti.run() != WL_CONNECTED && millis() - startAttempt < WIFI_CONNECT_TIMEOUT) {
-    delay(100);
-    setLED(true, false, false);
-    delay(100);
-    setLED(false, false, false);
-  }
-
-  if (WiFi.status() == WL_CONNECTED) {
-    wifiConnected = true;
-    ipAddress = WiFi.localIP().toString();
-    DEBUG_PRINTLN("WiFi connected!");
-    DEBUG_PRINT("IP address: ");
-    DEBUG_PRINTLN(ipAddress);
-    DEBUG_PRINT("Connected to: ");
-    DEBUG_PRINTLN(WiFi.SSID());
-    setLED(false, true, false);
-    playTone(BUZZER_FREQ_FIX, BUZZER_DURATION);
-  } else {
-    wifiConnected = false;
-    ipAddress = "No WiFi";
-    DEBUG_PRINTLN("WiFi connection failed!");
-    setLED(true, false, false);
-    playTone(BUZZER_FREQ_LOST, BUZZER_DURATION * 2);
-  }
+  // La connexion est maintenant gérée de manière non bloquante dans la loop()
+  // On lance juste la première tentative ici.
+  wifiMulti.run();
+  ipAddress = "Connecting...";
+  DEBUG_PRINTLN("WiFi connection process started...");
 }
 
 // ============================================================================
@@ -584,11 +560,42 @@ void onWebSocketEvent(AsyncWebSocket *server, AsyncWebSocketClient *client,
 // MAIN LOOP
 // ============================================================================
 void loop() {
+  static unsigned long wifiConnectStart = millis();
+
+  // --- Gestion de la connexion WiFi (non-bloquant) ---
+  if (!wifiConnected) {
+    if (wifiMulti.run() == WL_CONNECTED) {
+      wifiConnected = true;
+      ipAddress = WiFi.localIP().toString();
+      DEBUG_PRINTLN("\nWiFi connected!");
+      DEBUG_PRINT("IP address: "); DEBUG_PRINTLN(ipAddress);
+      DEBUG_PRINT("Connected to: "); DEBUG_PRINTLN(WiFi.SSID());
+      setLED(false, true, false);
+      playTone(BUZZER_FREQ_FIX, BUZZER_DURATION);
+    } else if (millis() - wifiConnectStart > WIFI_CONNECT_TIMEOUT) {
+      // Timeout de connexion
+      ipAddress = "No WiFi";
+      DEBUG_PRINTLN("\nWiFi connection failed (timeout)!");
+      setLED(true, false, false);
+      playTone(BUZZER_FREQ_LOST, BUZZER_DURATION * 2);
+      wifiConnectStart = millis(); // Évite de retenter immédiatement
+    }
+  }
+
+  // --- Initialisation du serveur web (une fois le WiFi connecté) ---
+  if (wifiConnected && !webServerSetupDone) {
+    setupWebServer();
+    webServerSetupDone = true;
+  }
+
+  // --- Tâches principales ---
   handleButton();
   updateGPS();
   updateDisplay();
 
-  if (wifiConnected && connectedClients > 0) {
+  // --- Mise à jour WebSocket ---
+  // Le serveur doit être initialisé et des clients connectés
+  if (webServerSetupDone && connectedClients > 0) {
     static unsigned long lastWebUpdate = 0;
     if (millis() - lastWebUpdate > WEB_UPDATE_INTERVAL) {
       ws.textAll(getGPSJson());
@@ -596,7 +603,9 @@ void loop() {
     }
   }
 
-  ws.cleanupClients();
+  if (webServerSetupDone) {
+    ws.cleanupClients();
+  }
 }
 
 // ============================================================================
@@ -709,6 +718,11 @@ void drawHeader() {
   tft.setTextDatum(TL_DATUM);
   tft.drawString("IP:", 5, 70, 2);
   tft.setTextDatum(TR_DATUM);
+  if (!wifiConnected && ipAddress == "Connecting...") {
+      tft.setTextColor(TFT_COLOR_WARNING, TFT_COLOR_HEADER);
+  } else {
+      tft.setTextColor(TFT_COLOR_TEXT, TFT_COLOR_HEADER);
+  }
   tft.drawString(ipAddress, TFT_WIDTH - 5, 70, 2);
 
   tft.drawFastHLine(0, 100, TFT_WIDTH, TFT_COLOR_SEPARATOR);
