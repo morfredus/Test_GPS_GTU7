@@ -1,6 +1,6 @@
 # Testeur GPS pour ESP32-S3
 
-[![Version](https://img.shields.io/badge/version-1.5.0-blue)](CHANGELOG.md)
+[![Version](https://img.shields.io/badge/version-1.5.1-blue)](CHANGELOG.md)
 [![Platform](https://img.shields.io/badge/plateforme-ESP32--S3-green)](https://docs.platformio.org/en/latest/boards/espressif32/esp32-s3-devkitc-1.html)
 [![License](https://img.shields.io/badge/licence-MIT-orange)](LICENSE)
 

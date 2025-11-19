@@ -1,4 +1,4 @@
-// Version: 1.5.0
+// Version: 1.5.1
 // ESP32-S3 DevKitC-1 N16R8 - GPS Tester Configuration File
 
 #ifndef CONFIG_H

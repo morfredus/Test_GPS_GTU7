@@ -5,6 +5,14 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.5.1] - 2024-07-25
+### Fixed
+- Corrected the custom font file used for the startup screen to `DrSugiyama_Regular28pt7b.h`.
+- Corrected the LED behavior to ensure the green light blinks during GPS search.
+
+### Improved
+- Split the "Searching for WiFi..." message on the startup screen into two lines to prevent text overflow.
+
 ## [1.5.0] - 2024-07-25
 ### Added
 - Creation of a detailed and modular documentation structure (`INSTALL`, `USAGE`, `CONFIG`, etc.).
