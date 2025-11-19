@@ -1,4 +1,4 @@
-// Version: 1.7.3
+// Version: 1.8.2
 // ESP32-S3 DevKitC-1 N16R8 - GPS GT-U7 Tester - TFT Display Enhancements
 // Main Application File
 
@@ -729,11 +729,14 @@ void drawPageSatellites() {
 // NEOPIXEL LED CONTROL
 // ============================================================================
 void setLedStatus(LedState state, uint32_t color) {
-  ledState = state;
-  ledColor = color;
-  lastBlinkTime = millis(); // Reset blink timer on state change
-  ledOn = true; // Ensure LED is on when state changes
-  updateLed(); // Update immediately
+  // Only update if state or color has changed
+  if (ledState != state || ledColor != color) {
+    ledState = state;
+    ledColor = color;
+    lastBlinkTime = millis(); // Reset blink timer on state change
+    ledOn = true; // Ensure LED is on when state changes
+    updateLed(); // Update immediately to reflect new state
+  }
 }
 
 void updateLed() {
