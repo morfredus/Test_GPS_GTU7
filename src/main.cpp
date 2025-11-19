@@ -1,4 +1,4 @@
-// Version: 1.2.10
+// Version: 1.4.2
 // ESP32-S3 DevKitC-1 N16R8 - GPS GT-U7 Tester
 // Main Application File
 
@@ -7,23 +7,29 @@
 #include <WiFiMulti.h>
 #include <ESPAsyncWebServer.h>
 #include <AsyncTCP.h>
-#include <TFT_eSPI.h>
+#include <Adafruit_GFX.h>
+#include <Adafruit_ST7789.h>
 #include <TinyGPSPlus.h>
 #include <ArduinoJson.h>
 #include <Adafruit_NeoPixel.h>
 #include "config.h"
+#include "webpage.h" // Externalized web page content
+#include "DrSugiyama_Regular28pt7b.h" // Police personnalisée pour le démarrage
 #include "secrets.h"
 
 // ============================================================================
 // GLOBAL OBJECTS
 // ============================================================================
-TFT_eSPI tft = TFT_eSPI();
+// Utilisation de pointeurs pour les objets matériels afin d'éviter une initialisation précoce
+Adafruit_ST7789 *tftPtr = nullptr;
 TinyGPSPlus gps;
 WiFiMulti wifiMulti;
 AsyncWebServer server(WEB_SERVER_PORT);
 AsyncWebSocket ws("/ws");
-Adafruit_NeoPixel pixel(NEOPIXEL_NUM_PIXELS, PIN_NEOPIXEL, NEO_GRB + NEO_KHZ800);
+Adafruit_NeoPixel *pixelPtr = nullptr;
 
+// Macro globale pour un accès simplifié à l'objet TFT via son pointeur
+#define tft (*tftPtr)
 
 // ============================================================================
 // GLOBAL VARIABLES
@@ -38,6 +44,7 @@ unsigned long gpsFixAcquiredTime = 0;
 bool previousFixStatus = false;
 bool wifiConnected = false;
 String ipAddress = "";
+bool displayAvailable = false;
 bool webServerSetupDone = false;
 int connectedClients = 0;
 
@@ -58,7 +65,6 @@ uint32_t validSentences = 0;
 // FUNCTION PROTOTYPES
 // ============================================================================
 void setupPins();
-void setupSerial();
 void setupDisplay();
 void setupWiFi();
 void setupWebServer();
@@ -70,11 +76,13 @@ void drawHeader();
 void drawPageGPSData();
 void drawPageDiagnostics();
 void drawPageSatellites();
+
 void setLedStatus(LedState state, uint32_t color);
 void updateLed();
 void playTone(int frequency, int duration);
 void resetGPS();
 String getGPSJson();
+void drawInitScreen(const String& line1, const String& line2 = "", const String& line3 = "");
 void onWebSocketEvent(AsyncWebSocket *server, AsyncWebSocketClient *client,
                       AwsEventType type, void *arg, uint8_t *data, size_t len);
 
@@ -82,12 +90,24 @@ void onWebSocketEvent(AsyncWebSocket *server, AsyncWebSocketClient *client,
 // SETUP
 // ============================================================================
 void setup() {
+  // Initialize serial FIRST for debugging
+  Serial.begin(SERIAL_DEBUG_BAUD);
+  delay(1000);
+  DEBUG_PRINTLN("\n\n=== BOOT STARTING ===");
+
+  DEBUG_PRINTLN("Setting up pins...");
+  setupPins();
+
+  DEBUG_PRINTLN("Setting LED status...");
   setLedStatus(SOLID, NEOPIXEL_COLOR_BLUE); // Blue during init
 
-  setupPins();
-  setupSerial();
+  DEBUG_PRINTLN("Setting up display...");
   setupDisplay();
+
+  DEBUG_PRINTLN("Setting up GPS...");
   setupGPS();
+
+  DEBUG_PRINTLN("Setting up WiFi...");
   setupWiFi();
 
   DEBUG_PRINTLN("=================================");
@@ -103,32 +123,72 @@ void setup() {
 // PIN SETUP
 // ============================================================================
 void setupPins() {
+  DEBUG_PRINTLN("  - Setting up buttons...");
   pinMode(PIN_BUTTON_1, INPUT_PULLUP);
   pinMode(PIN_BUTTON_2, INPUT_PULLUP);
 
-  pixel.begin();
-  pixel.setBrightness(NEOPIXEL_BRIGHTNESS);
-  pixel.clear();
-  pixel.show();
+  DEBUG_PRINTLN("  - Initializing NeoPixel...");
+  // Create NeoPixel object dynamically to avoid early initialization crash
+  pixelPtr = new Adafruit_NeoPixel(NEOPIXEL_NUM_PIXELS, PIN_NEOPIXEL, NEO_GRB + NEO_KHZ800);
+  if (pixelPtr != nullptr) {
+    pixelPtr->begin();
+    pixelPtr->setBrightness(NEOPIXEL_BRIGHTNESS);
+    pixelPtr->clear();
+    pixelPtr->show();
+    DEBUG_PRINTLN("  - NeoPixel OK");
+  } else {
+    DEBUG_PRINTLN("  - NeoPixel FAILED to allocate!");
+  }
 
+  DEBUG_PRINTLN("  - Setting up buzzer (LEDC)...");
   // Initialize LEDC for the buzzer (tone function)
   // This prevents the "LEDC is not initialized" crash
   ledcSetup(BUZZER_LEDC_CHANNEL, BUZZER_FREQ_FIX, 8); // Setup channel with default freq, 8-bit resolution
   ledcAttachPin(PIN_BUZZER, BUZZER_LEDC_CHANNEL);
+  DEBUG_PRINTLN("  - Buzzer OK");
 
-  pinMode(PIN_TFT_BL, OUTPUT);
-  digitalWrite(PIN_TFT_BL, HIGH);
+  DEBUG_PRINTLN("  - Setting up TFT backlight...");
+  pinMode(TFT_BL, OUTPUT);
+  digitalWrite(TFT_BL, HIGH);
 
+  DEBUG_PRINTLN("  - Setting up GPS PPS pin...");
   pinMode(PIN_GPS_PPS, INPUT);
+  DEBUG_PRINTLN("  - Pin setup complete");
 }
 
 // ============================================================================
-// SERIAL SETUP
+// DRAW INITIALIZATION SCREEN
 // ============================================================================
-void setupSerial() {
-  Serial.begin(SERIAL_DEBUG_BAUD);
-  delay(1000);
-  DEBUG_PRINTLN("\n\nStarting GPS GT-U7 Tester...");
+void drawInitScreen(const String& line1, const String& line2, const String& line3) {
+  if (!displayAvailable) return;
+
+  tft.fillScreen(TFT_COLOR_BG);
+
+  // --- Draw Title ("morfredus") with custom font ---
+  tft.setFont(&DrSugiyama_Regular28pt7b);
+  tft.setTextColor(TFT_COLOR_WARNING);
+  tft.setTextSize(1); // Augmentation de la taille de la police personnalisée
+  int16_t x1, y1;
+  uint16_t w, h;
+  tft.getTextBounds("morfredus", 0, 0, &x1, &y1, &w, &h);
+  tft.setCursor((TFT_WIDTH - w) / 2, 60);
+  tft.print("morfredus");
+
+  // --- Draw Subtitle ("GPS Tester") ---
+  tft.setFont(); // Reset to default font
+  tft.setTextSize(3);
+  tft.setTextColor(TFT_COLOR_HEADER);
+  tft.getTextBounds("GPS Tester", 0, 0, &x1, &y1, &w, &h);
+  tft.setCursor((TFT_WIDTH - w) / 2, 95);
+  tft.print("GPS Tester");
+
+  // --- Draw status lines with default font ---
+  tft.setTextSize(2);
+  tft.setTextColor(TFT_COLOR_TEXT);
+  // Centrer les lignes de statut pour un meilleur look
+  tft.getTextBounds(line1, 0, 0, &x1, &y1, &w, &h); tft.setCursor((TFT_WIDTH - w) / 2, 150); tft.print(line1);
+  tft.getTextBounds(line2, 0, 0, &x1, &y1, &w, &h); tft.setCursor((TFT_WIDTH - w) / 2, 180); tft.print(line2);
+  tft.getTextBounds(line3, 0, 0, &x1, &y1, &w, &h); tft.setCursor((TFT_WIDTH - w) / 2, 210); tft.print(line3);
 }
 
 // ============================================================================
@@ -136,16 +196,21 @@ void setupSerial() {
 // ============================================================================
 void setupDisplay() {
   updateLed(); // Show blue color
-  DEBUG_PRINTLN("Initializing TFT display...");
-  tft.init();
-  tft.setRotation(TFT_ROTATION);
-  tft.fillScreen(TFT_COLOR_BG);
-  tft.setTextColor(TFT_COLOR_TEXT, TFT_COLOR_BG);
 
-  tft.setTextDatum(MC_DATUM);
-  tft.drawString("Initializing...", TFT_WIDTH/2, TFT_HEIGHT/2, 4);
-
-  DEBUG_PRINTLN("TFT display initialized");
+  DEBUG_PRINTLN("Initializing TFT ST7789 display...");
+  tftPtr = new Adafruit_ST7789(TFT_CS, TFT_DC, TFT_RST);
+  if (tftPtr != nullptr) {
+    tftPtr->init(TFT_WIDTH, TFT_HEIGHT);
+    tftPtr->setRotation(TFT_ROTATION);
+    tftPtr->fillScreen(TFT_COLOR_BG);
+    tftPtr->setTextWrap(false);
+    displayAvailable = true;
+    drawInitScreen("Initializing...");
+    DEBUG_PRINTLN("TFT display initialized");
+  } else {
+    DEBUG_PRINTLN("ERROR: Failed to allocate TFT object!");
+    displayAvailable = false;
+  }
 }
 
 // ============================================================================
@@ -164,16 +229,14 @@ void setupGPS() {
 // ============================================================================
 void setupWiFi() {
   updateLed(); // Show blue color
+  if (displayAvailable) drawInitScreen("Searching for", "WiFi..."); // Texte sur deux lignes
   DEBUG_PRINTLN("Connecting to WiFi...");
 
   WiFi.mode(WIFI_STA);
   wifiMulti.addAP(WIFI_SSID_1, WIFI_PASSWORD_1);
   wifiMulti.addAP(WIFI_SSID_2, WIFI_PASSWORD_2);
 
-  // La connexion est maintenant gérée de manière non bloquante dans la loop()
-  // On lance juste la première tentative ici.
-  wifiMulti.run();
-  ipAddress = "Connecting...";
+  ipAddress = "Connecting..."; // Statut initial
   DEBUG_PRINTLN("WiFi connection process started...");
 }
 
@@ -193,358 +256,8 @@ void setupWebServer() {
 
   server.on("/", HTTP_GET, [](AsyncWebServerRequest *request) {
     DEBUG_PRINTF("Web request received from: %s\n", request->client()->remoteIP().toString().c_str());
-    String html = R"rawliteral(
-<!DOCTYPE html>
-<html lang="en">
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>GPS GT-U7 Tester</title>
-    <style>
-        * { margin: 0; padding: 0; box-sizing: border-box; }
-        body {
-            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
-            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-            color: #fff;
-            padding: 20px;
-            min-height: 100vh;
-        }
-        .container {
-            max-width: 1200px;
-            margin: 0 auto;
-        }
-        .header {
-            text-align: center;
-            padding: 30px 0;
-            background: rgba(255, 255, 255, 0.1);
-            border-radius: 15px;
-            margin-bottom: 30px;
-            backdrop-filter: blur(10px);
-        }
-        .header h1 {
-            font-size: 2.5em;
-            margin-bottom: 10px;
-            text-shadow: 2px 2px 4px rgba(0,0,0,0.3);
-        }
-        .header .subtitle {
-            font-size: 1.2em;
-            opacity: 0.9;
-        }
-        .status-bar {
-            display: flex;
-            justify-content: space-around;
-            flex-wrap: wrap;
-            gap: 15px;
-            margin-bottom: 30px;
-        }
-        .status-item {
-            background: rgba(255, 255, 255, 0.15);
-            padding: 15px 25px;
-            border-radius: 10px;
-            backdrop-filter: blur(10px);
-            flex: 1;
-            min-width: 150px;
-            text-align: center;
-        }
-        .status-item .label {
-            font-size: 0.9em;
-            opacity: 0.8;
-            margin-bottom: 5px;
-        }
-        .status-item .value {
-            font-size: 1.5em;
-            font-weight: bold;
-        }
-        .status-good { border-left: 4px solid #4CAF50; }
-        .status-warning { border-left: 4px solid #FFC107; }
-        .status-error { border-left: 4px solid #F44336; }
-        .cards {
-            display: grid;
-            grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
-            gap: 20px;
-            margin-bottom: 30px;
-        }
-        .card {
-            background: rgba(255, 255, 255, 0.15);
-            border-radius: 15px;
-            padding: 25px;
-            backdrop-filter: blur(10px);
-            box-shadow: 0 8px 32px 0 rgba(31, 38, 135, 0.37);
-        }
-        .card h2 {
-            margin-bottom: 20px;
-            font-size: 1.5em;
-            border-bottom: 2px solid rgba(255, 255, 255, 0.3);
-            padding-bottom: 10px;
-        }
-        .data-row {
-            display: flex;
-            justify-content: space-between;
-            padding: 10px 0;
-            border-bottom: 1px solid rgba(255, 255, 255, 0.1);
-        }
-        .data-row:last-child {
-            border-bottom: none;
-        }
-        .data-label {
-            opacity: 0.8;
-        }
-        .data-value {
-            font-weight: bold;
-            font-family: 'Courier New', monospace;
-        }
-        .map-container {
-            background: rgba(255, 255, 255, 0.15);
-            border-radius: 15px;
-            padding: 25px;
-            backdrop-filter: blur(10px);
-            margin-bottom: 30px;
-        }
-        .map-container h2 {
-            margin-bottom: 15px;
-        }
-        #map {
-            width: 100%;
-            height: 400px;
-            border-radius: 10px;
-            background: #fff;
-        }
-        .controls {
-            display: flex;
-            gap: 15px;
-            justify-content: center;
-            flex-wrap: wrap;
-        }
-        .btn {
-            padding: 15px 30px;
-            font-size: 1.1em;
-            border: none;
-            border-radius: 10px;
-            cursor: pointer;
-            transition: all 0.3s;
-            font-weight: bold;
-            text-transform: uppercase;
-            box-shadow: 0 4px 15px rgba(0,0,0,0.2);
-        }
-        .btn-primary {
-            background: #4CAF50;
-            color: white;
-        }
-        .btn-primary:hover {
-            background: #45a049;
-            transform: translateY(-2px);
-            box-shadow: 0 6px 20px rgba(0,0,0,0.3);
-        }
-        .btn-danger {
-            background: #F44336;
-            color: white;
-        }
-        .btn-danger:hover {
-            background: #da190b;
-            transform: translateY(-2px);
-            box-shadow: 0 6px 20px rgba(0,0,0,0.3);
-        }
-        .satellite-grid {
-            display: grid;
-            grid-template-columns: repeat(auto-fill, minmax(80px, 1fr));
-            gap: 10px;
-            margin-top: 15px;
-        }
-        .satellite {
-            background: rgba(255, 255, 255, 0.2);
-            padding: 10px;
-            border-radius: 8px;
-            text-align: center;
-        }
-        .satellite .sat-id {
-            font-weight: bold;
-            margin-bottom: 5px;
-        }
-        .satellite .sat-snr {
-            font-size: 0.9em;
-            opacity: 0.9;
-        }
-        @keyframes pulse {
-            0%, 100% { opacity: 1; }
-            50% { opacity: 0.5; }
-        }
-        .updating {
-            animation: pulse 1s infinite;
-        }
-        @media (max-width: 768px) {
-            .header h1 { font-size: 1.8em; }
-            .cards { grid-template-columns: 1fr; }
-        }
-    </style>
-</head>
-<body>
-    <div class="container">
-        <div class="header">
-            <h1>🛰️ GPS GT-U7 Tester</h1>
-            <div class="subtitle">ESP32-S3 DevKitC-1 N16R8 | v)rawliteral" + String(PROJECT_VERSION) + R"rawliteral(</div>
-        </div>
-
-        <div class="status-bar">
-            <div class="status-item" id="fix-status">
-                <div class="label">GPS Fix</div>
-                <div class="value" id="fix-value">Searching...</div>
-            </div>
-            <div class="status-item" id="sat-status">
-                <div class="label">Satellites</div>
-                <div class="value" id="sat-value">0</div>
-            </div>
-            <div class="status-item" id="hdop-status">
-                <div class="label">HDOP</div>
-                <div class="value" id="hdop-value">--</div>
-            </div>
-            <div class="status-item status-good">
-                <div class="label">Uptime</div>
-                <div class="value" id="uptime-value">0s</div>
-            </div>
-        </div>
-
-        <div class="cards">
-            <div class="card">
-                <h2>📍 Position</h2>
-                <div class="data-row">
-                    <span class="data-label">Latitude:</span>
-                    <span class="data-value" id="lat">--</span>
-                </div>
-                <div class="data-row">
-                    <span class="data-label">Longitude:</span>
-                    <span class="data-value" id="lng">--</span>
-                </div>
-                <div class="data-row">
-                    <span class="data-label">Altitude:</span>
-                    <span class="data-value" id="alt">--</span>
-                </div>
-                <div class="data-row">
-                    <span class="data-label">Speed:</span>
-                    <span class="data-value" id="speed">--</span>
-                </div>
-                <div class="data-row">
-                    <span class="data-label">Course:</span>
-                    <span class="data-value" id="course">--</span>
-                </div>
-            </div>
-
-            <div class="card">
-                <h2>🕐 Date & Time</h2>
-                <div class="data-row">
-                    <span class="data-label">Date:</span>
-                    <span class="data-value" id="date">--</span>
-                </div>
-                <div class="data-row">
-                    <span class="data-label">Time (UTC):</span>
-                    <span class="data-value" id="time">--</span>
-                </div>
-                <div class="data-row">
-                    <span class="data-label">Age:</span>
-                    <span class="data-value" id="age">--</span>
-                </div>
-            </div>
-
-            <div class="card">
-                <h2>📊 Diagnostics</h2>
-                <div class="data-row">
-                    <span class="data-label">Valid Sentences:</span>
-                    <span class="data-value" id="valid">0</span>
-                </div>
-                <div class="data-row">
-                    <span class="data-label">Failed Checksums:</span>
-                    <span class="data-value" id="failed">0</span>
-                </div>
-                <div class="data-row">
-                    <span class="data-label">Total Characters:</span>
-                    <span class="data-value" id="chars">0</span>
-                </div>
-                <div class="data-row">
-                    <span class="data-label">Success Rate:</span>
-                    <span class="data-value" id="success-rate">100%</span>
-                </div>
-            </div>
-        </div>
-
-        <div class="controls">
-            <button class="btn btn-danger" onclick="resetGPS()">🔄 Reset GPS</button>
-        </div>
-    </div>
-
-    <script>
-        let ws;
-        let reconnectInterval;
-
-        function connect() {
-            ws = new WebSocket('ws://' + window.location.hostname + '/ws');
-
-            ws.onopen = () => {
-                console.log('WebSocket connected');
-                clearInterval(reconnectInterval);
-            };
-
-            ws.onmessage = (event) => {
-                const data = JSON.parse(event.data);
-                updateDisplay(data);
-            };
-
-            ws.onclose = () => {
-                console.log('WebSocket disconnected');
-                reconnectInterval = setInterval(() => {
-                    connect();
-                }, 3000);
-            };
-
-            ws.onerror = (error) => {
-                console.error('WebSocket error:', error);
-            };
-        }
-
-        function updateDisplay(data) {
-            document.getElementById('fix-value').textContent = data.fix ? 'LOCKED' : 'NO FIX';
-            const fixStatus = document.getElementById('fix-status');
-            fixStatus.className = 'status-item ' + (data.fix ? 'status-good' : 'status-error');
-
-            document.getElementById('sat-value').textContent = data.satellites;
-            const satStatus = document.getElementById('sat-status');
-            satStatus.className = 'status-item ' + (data.satellites >= 4 ? 'status-good' : 'status-warning');
-
-            document.getElementById('hdop-value').textContent = data.hdop;
-            const hdopStatus = document.getElementById('hdop-status');
-            const hdopVal = parseFloat(data.hdop);
-            hdopStatus.className = 'status-item ' + (hdopVal < 2 ? 'status-good' : hdopVal < 5 ? 'status-warning' : 'status-error');
-
-            document.getElementById('uptime-value').textContent = data.uptime;
-
-            document.getElementById('lat').textContent = data.latitude;
-            document.getElementById('lng').textContent = data.longitude;
-            document.getElementById('alt').textContent = data.altitude;
-            document.getElementById('speed').textContent = data.speed;
-            document.getElementById('course').textContent = data.course;
-
-            document.getElementById('date').textContent = data.date;
-            document.getElementById('time').textContent = data.time;
-            document.getElementById('age').textContent = data.age;
-
-            document.getElementById('valid').textContent = data.validSentences;
-            document.getElementById('failed').textContent = data.failedChecksums;
-            document.getElementById('chars').textContent = data.totalChars;
-            document.getElementById('success-rate').textContent = data.successRate;
-        }
-
-        function resetGPS() {
-            if (confirm('Reset GPS module? This will restart the GPS.')) {
-                fetch('/reset', { method: 'POST' })
-                    .then(response => response.text())
-                    .then(data => alert(data))
-                    .catch(error => alert('Error: ' + error));
-            }
-        }
-
-        connect();
-    </script>
-</body>
-</html>
-)rawliteral";
+    String html(HTML_CONTENT);
+    html.replace("%PROJECT_VERSION%", String(PROJECT_VERSION));
     request->send(200, "text/html", html);
   });
 
@@ -579,34 +292,32 @@ void onWebSocketEvent(AsyncWebSocket *server, AsyncWebSocketClient *client,
 // MAIN LOOP
 // ============================================================================
 void loop() {
-  static unsigned long wifiConnectStart = millis();
+  static unsigned long lastWifiCheck = 0;
 
   // --- Gestion de la connexion WiFi (non-bloquant) ---
-  if (!wifiConnected) {
-    if (wifiMulti.run() == WL_CONNECTED) {
-      DEBUG_PRINTLN(">>> WiFi connection successful!");
-      wifiConnected = true;
-      ipAddress = WiFi.localIP().toString();
-      DEBUG_PRINTLN("\nWiFi connected!");
-      DEBUG_PRINT("IP address: "); DEBUG_PRINTLN(ipAddress);
-      DEBUG_PRINT("Connected to: "); DEBUG_PRINTLN(WiFi.SSID());
-      setLedStatus(BLINKING, NEOPIXEL_COLOR_GREEN); // Start searching for GPS
-      playTone(BUZZER_FREQ_FIX, BUZZER_DURATION);
-    } else if (millis() - wifiConnectStart > WIFI_CONNECT_TIMEOUT) {
-      // Timeout de connexion
-      ipAddress = "No WiFi";
-      DEBUG_PRINTLN("\nWiFi connection failed (timeout)!");
-      setLedStatus(SOLID, NEOPIXEL_COLOR_RED); // Error state
-      playTone(BUZZER_FREQ_LOST, BUZZER_DURATION * 2);
-      wifiConnectStart = millis(); // Évite de retenter immédiatement
-    }
-  }
+  if (!wifiConnected && millis() - lastWifiCheck > WIFI_RETRY_DELAY) {
+    if (wifiMulti.run() == WL_CONNECTED) { // Tentative de connexion
+        DEBUG_PRINTLN(">>> WiFi connection successful!");
+        wifiConnected = true;
+        ipAddress = WiFi.localIP().toString();
+        DEBUG_PRINTLN("\nWiFi connected!");
+        DEBUG_PRINT("IP address: "); DEBUG_PRINTLN(ipAddress);
+        DEBUG_PRINT("Connected to: "); DEBUG_PRINTLN(WiFi.SSID());
+        if (displayAvailable) {
+            drawInitScreen("Connected to:", WiFi.SSID(), "IP: " + ipAddress);
+            delay(2000); // Pause pour montrer l'IP
+        }
+        setLedStatus(BLINKING, NEOPIXEL_COLOR_RED); // Commence la recherche GPS
+        playTone(BUZZER_FREQ_FIX, BUZZER_DURATION);
 
-  // --- Initialisation du serveur web (une fois le WiFi connecté) ---
-  if (wifiConnected && !webServerSetupDone) {
-    DEBUG_PRINTLN(">>> WiFi is connected, proceeding to web server setup...");
-    setupWebServer();
-    webServerSetupDone = true;
+        // Initialisation du serveur web (une seule fois)
+        if (!webServerSetupDone) {
+            DEBUG_PRINTLN(">>> WiFi is connected, proceeding to web server setup...");
+            setupWebServer();
+            webServerSetupDone = true;
+        }
+    }
+    lastWifiCheck = millis();
   }
 
   // --- Tâches principales ---
@@ -669,50 +380,53 @@ void updateGPS() {
 
   bool currentFixStatus = gps.location.isValid() && gps.location.age() < GPS_TIMEOUT;
 
-  if (currentFixStatus != previousFixStatus) {
-    if (currentFixStatus) {
+  if (currentFixStatus) {
+    // --- We have a GPS fix ---
+    if (!previousFixStatus) {
+      // This is the moment we just acquired the fix
       DEBUG_PRINTLN("GPS FIX ACQUIRED!");
       gpsFixAcquiredTime = millis();
       if (BUZZER_ENABLED) {
         playTone(BUZZER_FREQ_FIX, BUZZER_DURATION);
       }
-      setLedStatus(SOLID, NEOPIXEL_COLOR_GREEN); // Solid Green for GPS fix
+      ws.textAll(getGPSJson()); // Send immediate update on fix acquired
+    }
+    // Check precision for LED color
+    if (gps.hdop.isValid() && gps.hdop.hdop() < HDOP_GOOD_THRESHOLD) {
+      setLedStatus(SOLID, NEOPIXEL_COLOR_GREEN); // Good precision
     } else {
+      setLedStatus(SOLID, NEOPIXEL_COLOR_BLUE); // Fix OK, but precision is not optimal
+    }
+  } else {
+    // --- No GPS fix ---
+    if (previousFixStatus) {
+      // This is the moment we just lost the fix
       DEBUG_PRINTLN("GPS FIX LOST!");
       if (BUZZER_ENABLED) {
         playTone(BUZZER_FREQ_LOST, BUZZER_DURATION * 2);
       }
-      // If WiFi is connected, blink green for searching. Otherwise, it might be an error.
-      if (wifiConnected) {
-        setLedStatus(BLINKING, NEOPIXEL_COLOR_GREEN); // Blinking Green for searching
-      }
+      ws.textAll(getGPSJson()); // Send immediate update on fix lost
     }
-    previousFixStatus = currentFixStatus;
   }
+  previousFixStatus = currentFixStatus;
 }
 
 // ============================================================================
 // DISPLAY UPDATE
 // ============================================================================
 void updateDisplay() {
+  if (!displayAvailable) return;
+
   if (millis() - lastDisplayUpdate < GPS_UPDATE_RATE) {
     return;
   }
-
   lastDisplayUpdate = millis();
 
-  drawHeader();
-
+  drawHeader(); // Common header for all pages
   switch (currentPage) {
-    case PAGE_GPS_DATA:
-      drawPageGPSData();
-      break;
-    case PAGE_DIAGNOSTICS:
-      drawPageDiagnostics();
-      break;
-    case PAGE_SATELLITES:
-      drawPageSatellites();
-      break;
+    case PAGE_GPS_DATA:      drawPageGPSData();      break;
+    case PAGE_DIAGNOSTICS:   drawPageDiagnostics();  break;
+    case PAGE_SATELLITES:    drawPageSatellites();   break;
   }
 }
 
@@ -720,29 +434,44 @@ void updateDisplay() {
 // DRAW HEADER
 // ============================================================================
 void drawHeader() {
+  if (!displayAvailable) return;
   tft.fillRect(0, 0, TFT_WIDTH, 100, TFT_COLOR_HEADER);
+  tft.setTextSize(FONT_SIZE_HEADER);
 
+  int16_t x1, y1;
+  uint16_t w, h;
+  
   tft.setTextColor(TFT_COLOR_TEXT, TFT_COLOR_HEADER);
-  tft.setTextDatum(TC_DATUM);
-  tft.drawString(PROJECT_NAME, TFT_WIDTH/2, 5, 2);
-  tft.drawString("Model: " + String(GPS_MODEL), TFT_WIDTH/2, 25, 2);
+  tft.getTextBounds(PROJECT_NAME, 0, 0, &x1, &y1, &w, &h);
+  tft.setCursor((TFT_WIDTH - w) / 2, 5);
+  tft.print(PROJECT_NAME);
+
+  String modelStr = "Model: " + String(GPS_MODEL);
+  tft.getTextBounds(modelStr, 0, 0, &x1, &y1, &w, &h);
+  tft.setCursor((TFT_WIDTH - w) / 2, 25);
+  tft.print(modelStr);
 
   bool hasFix = gps.location.isValid() && gps.location.age() < GPS_TIMEOUT;
   String status = hasFix ? "FIX OK" : "NO FIX";
   uint16_t statusColor = hasFix ? TFT_COLOR_VALUE : TFT_COLOR_ERROR;
   tft.setTextColor(statusColor, TFT_COLOR_HEADER);
-  tft.drawString("Status: " + status, TFT_WIDTH/2, 45, 2);
-
+  String statusStr = "Status: " + status;
+  tft.getTextBounds(statusStr, 0, 0, &x1, &y1, &w, &h);
+  tft.setCursor((TFT_WIDTH - w) / 2, 45);
+  tft.print(statusStr);
+  
   tft.setTextColor(TFT_COLOR_TEXT, TFT_COLOR_HEADER);
-  tft.setTextDatum(TL_DATUM);
-  tft.drawString("IP:", 5, 70, 2);
-  tft.setTextDatum(TR_DATUM);
+  tft.setCursor(5, 70);
+  tft.print("IP:");
+
   if (!wifiConnected && ipAddress == "Connecting...") {
       tft.setTextColor(TFT_COLOR_WARNING, TFT_COLOR_HEADER);
   } else {
       tft.setTextColor(TFT_COLOR_TEXT, TFT_COLOR_HEADER);
   }
-  tft.drawString(ipAddress, TFT_WIDTH - 5, 70, 2);
+  tft.getTextBounds(ipAddress, 0, 0, &x1, &y1, &w, &h);
+  tft.setCursor(TFT_WIDTH - 5 - w, 70);
+  tft.print(ipAddress);
 
   tft.drawFastHLine(0, 100, TFT_WIDTH, TFT_COLOR_SEPARATOR);
 }
@@ -755,54 +484,70 @@ void drawPageGPSData() {
   int lineHeight = 22;
 
   tft.fillRect(0, 101, TFT_WIDTH, TFT_HEIGHT - 101, TFT_COLOR_BG);
+  tft.setTextSize(FONT_SIZE_DEFAULT);
 
+  int16_t x1, y1;
+  uint16_t w, h;
+  String pageTitle = "GPS DATA";
   tft.setTextColor(TFT_COLOR_WARNING, TFT_COLOR_BG);
-  tft.setTextDatum(TC_DATUM);
-  tft.drawString("GPS DATA", TFT_WIDTH/2, y, 2);
+  tft.getTextBounds(pageTitle, 0, 0, &x1, &y1, &w, &h);
+  tft.setCursor((TFT_WIDTH - w) / 2, y);
+  tft.print(pageTitle);
   y += lineHeight + 5;
 
-  tft.setTextDatum(TL_DATUM);
   tft.setTextColor(TFT_COLOR_TEXT, TFT_COLOR_BG);
 
   String lat = gps.location.isValid() ? String(gps.location.lat(), 6) : "--";
-  tft.drawString("Lat: ", 10, y, 2);
+  tft.setCursor(10, y);
+  tft.print("Lat: ");
   tft.setTextColor(TFT_COLOR_VALUE, TFT_COLOR_BG);
-  tft.drawString(lat, 60, y, 2);
+  tft.setCursor(60, y);
+  tft.print(lat);
   y += lineHeight;
 
   tft.setTextColor(TFT_COLOR_TEXT, TFT_COLOR_BG);
   String lng = gps.location.isValid() ? String(gps.location.lng(), 6) : "--";
-  tft.drawString("Lng: ", 10, y, 2);
+  tft.setCursor(10, y);
+  tft.print("Lng: ");
   tft.setTextColor(TFT_COLOR_VALUE, TFT_COLOR_BG);
-  tft.drawString(lng, 60, y, 2);
+  tft.setCursor(60, y);
+  tft.print(lng);
   y += lineHeight;
 
   tft.setTextColor(TFT_COLOR_TEXT, TFT_COLOR_BG);
   String alt = gps.altitude.isValid() ? String(gps.altitude.meters(), 1) + "m" : "--";
-  tft.drawString("Alt: ", 10, y, 2);
+  tft.setCursor(10, y);
+  tft.print("Alt: ");
   tft.setTextColor(TFT_COLOR_VALUE, TFT_COLOR_BG);
-  tft.drawString(alt, 60, y, 2);
+  tft.setCursor(60, y);
+  tft.print(alt);
   y += lineHeight;
 
   tft.setTextColor(TFT_COLOR_TEXT, TFT_COLOR_BG);
   String spd = gps.speed.isValid() ? String(gps.speed.kmph(), 1) + "km/h" : "--";
-  tft.drawString("Speed:", 10, y, 2);
+  tft.setCursor(10, y);
+  tft.print("Speed:");
   tft.setTextColor(TFT_COLOR_VALUE, TFT_COLOR_BG);
-  tft.drawString(spd, 80, y, 2);
+  tft.setCursor(80, y);
+  tft.print(spd);
   y += lineHeight;
 
   tft.setTextColor(TFT_COLOR_TEXT, TFT_COLOR_BG);
   String crs = gps.course.isValid() ? String(gps.course.deg(), 1) + "°" : "--";
-  tft.drawString("Course:", 10, y, 2);
+  tft.setCursor(10, y);
+  tft.print("Course:");
   tft.setTextColor(TFT_COLOR_VALUE, TFT_COLOR_BG);
-  tft.drawString(crs, 80, y, 2);
+  tft.setCursor(80, y);
+  tft.print(crs);
   y += lineHeight;
 
   tft.setTextColor(TFT_COLOR_TEXT, TFT_COLOR_BG);
   String sats = String(gps.satellites.value());
-  tft.drawString("Sats:", 10, y, 2);
+  tft.setCursor(10, y);
+  tft.print("Sats:");
   tft.setTextColor(TFT_COLOR_VALUE, TFT_COLOR_BG);
-  tft.drawString(sats, 80, y, 2);
+  tft.setCursor(80, y);
+  tft.print(sats);
   y += lineHeight;
 
   if (gps.date.isValid() && gps.time.isValid()) {
@@ -811,9 +556,11 @@ void drawPageGPSData() {
     sprintf(dateStr, "%02d/%02d/%04d %02d:%02d:%02d",
             gps.date.day(), gps.date.month(), gps.date.year(),
             gps.time.hour(), gps.time.minute(), gps.time.second());
-    tft.drawString("UTC:", 10, y, 2);
+    tft.setCursor(10, y);
+    tft.print("UTC:");
     tft.setTextColor(TFT_COLOR_VALUE, TFT_COLOR_BG);
-    tft.drawString(dateStr, 10, y + lineHeight, 2);
+    tft.setCursor(10, y + lineHeight);
+    tft.print(dateStr);
   }
 }
 
@@ -825,30 +572,39 @@ void drawPageDiagnostics() {
   int lineHeight = 22;
 
   tft.fillRect(0, 101, TFT_WIDTH, TFT_HEIGHT - 101, TFT_COLOR_BG);
+  tft.setTextSize(FONT_SIZE_DEFAULT);
 
+  int16_t x1, y1;
+  uint16_t w, h;
+  String pageTitle = "DIAGNOSTICS";
   tft.setTextColor(TFT_COLOR_WARNING, TFT_COLOR_BG);
-  tft.setTextDatum(TC_DATUM);
-  tft.drawString("DIAGNOSTICS", TFT_WIDTH/2, y, 2);
+  tft.getTextBounds(pageTitle, 0, 0, &x1, &y1, &w, &h);
+  tft.setCursor((TFT_WIDTH - w) / 2, y);
+  tft.print(pageTitle);
   y += lineHeight + 5;
 
-  tft.setTextDatum(TL_DATUM);
-
   tft.setTextColor(TFT_COLOR_TEXT, TFT_COLOR_BG);
-  tft.drawString("Valid:", 10, y, 2);
+  tft.setCursor(10, y);
+  tft.print("Valid:");
   tft.setTextColor(TFT_COLOR_VALUE, TFT_COLOR_BG);
-  tft.drawString(String(validSentences), 120, y, 2);
+  tft.setCursor(120, y);
+  tft.print(String(validSentences));
   y += lineHeight;
 
   tft.setTextColor(TFT_COLOR_TEXT, TFT_COLOR_BG);
-  tft.drawString("Failed:", 10, y, 2);
+  tft.setCursor(10, y);
+  tft.print("Failed:");
   tft.setTextColor(failedChecksums > 0 ? TFT_COLOR_ERROR : TFT_COLOR_VALUE, TFT_COLOR_BG);
-  tft.drawString(String(failedChecksums), 120, y, 2);
+  tft.setCursor(120, y);
+  tft.print(String(failedChecksums));
   y += lineHeight;
 
   tft.setTextColor(TFT_COLOR_TEXT, TFT_COLOR_BG);
-  tft.drawString("Chars:", 10, y, 2);
+  tft.setCursor(10, y);
+  tft.print("Chars:");
   tft.setTextColor(TFT_COLOR_VALUE, TFT_COLOR_BG);
-  tft.drawString(String(gps.charsProcessed()), 120, y, 2);
+  tft.setCursor(120, y);
+  tft.print(String(gps.charsProcessed()));
   y += lineHeight;
 
   float successRate = 0;
@@ -856,33 +612,41 @@ void drawPageDiagnostics() {
     successRate = ((totalSentences - failedChecksums) * 100.0) / totalSentences;
   }
   tft.setTextColor(TFT_COLOR_TEXT, TFT_COLOR_BG);
-  tft.drawString("Success:", 10, y, 2);
+  tft.setCursor(10, y);
+  tft.print("Success:");
   tft.setTextColor(successRate > 95 ? TFT_COLOR_VALUE : TFT_COLOR_WARNING, TFT_COLOR_BG);
-  tft.drawString(String(successRate, 1) + "%", 120, y, 2);
+  tft.setCursor(120, y);
+  tft.print(String(successRate, 1) + "%");
   y += lineHeight;
 
   tft.setTextColor(TFT_COLOR_TEXT, TFT_COLOR_BG);
   String hdop = gps.hdop.isValid() ? String(gps.hdop.hdop(), 2) : "--";
-  tft.drawString("HDOP:", 10, y, 2);
+  tft.setCursor(10, y);
+  tft.print("HDOP:");
   tft.setTextColor(TFT_COLOR_VALUE, TFT_COLOR_BG);
-  tft.drawString(hdop, 120, y, 2);
+  tft.setCursor(120, y);
+  tft.print(hdop);
   y += lineHeight;
 
   tft.setTextColor(TFT_COLOR_TEXT, TFT_COLOR_BG);
   unsigned long age = gps.location.age();
   String ageStr = age < 1000 ? String(age) + "ms" : String(age / 1000) + "s";
-  tft.drawString("Age:", 10, y, 2);
+  tft.setCursor(10, y);
+  tft.print("Age:");
   tft.setTextColor(age < GPS_TIMEOUT ? TFT_COLOR_VALUE : TFT_COLOR_ERROR, TFT_COLOR_BG);
-  tft.drawString(ageStr, 120, y, 2);
+  tft.setCursor(120, y);
+  tft.print(ageStr);
   y += lineHeight;
 
   tft.setTextColor(TFT_COLOR_TEXT, TFT_COLOR_BG);
-  tft.drawString("Uptime:", 10, y, 2);
+  tft.setCursor(10, y);
+  tft.print("Uptime:");
   tft.setTextColor(TFT_COLOR_VALUE, TFT_COLOR_BG);
   unsigned long uptime = millis() / 1000;
   char uptimeStr[32];
   sprintf(uptimeStr, "%luh %lum %lus", uptime / 3600, (uptime % 3600) / 60, uptime % 60);
-  tft.drawString(uptimeStr, 10, y + lineHeight, 2);
+  tft.setCursor(10, y + lineHeight);
+  tft.print(uptimeStr);
 }
 
 // ============================================================================
@@ -893,19 +657,24 @@ void drawPageSatellites() {
   int lineHeight = 22;
 
   tft.fillRect(0, 101, TFT_WIDTH, TFT_HEIGHT - 101, TFT_COLOR_BG);
+  tft.setTextSize(FONT_SIZE_DEFAULT);
 
+  int16_t x1, y1;
+  uint16_t w, h;
+  String pageTitle = "SATELLITES";
   tft.setTextColor(TFT_COLOR_WARNING, TFT_COLOR_BG);
-  tft.setTextDatum(TC_DATUM);
-  tft.drawString("SATELLITES", TFT_WIDTH/2, y, 2);
+  tft.getTextBounds(pageTitle, 0, 0, &x1, &y1, &w, &h);
+  tft.setCursor((TFT_WIDTH - w) / 2, y);
+  tft.print(pageTitle);
   y += lineHeight + 5;
 
-  tft.setTextDatum(TL_DATUM);
-
   tft.setTextColor(TFT_COLOR_TEXT, TFT_COLOR_BG);
-  tft.drawString("Satellites:", 10, y, 2);
+  tft.setCursor(10, y);
+  tft.print("Satellites:");
   tft.setTextColor(TFT_COLOR_VALUE, TFT_COLOR_BG);
   uint32_t satCount = gps.satellites.value();
-  tft.drawString(String(satCount), 140, y, 2);
+  tft.setCursor(140, y);
+  tft.print(String(satCount));
   y += lineHeight;
 
   if (satCount > 0) {
@@ -914,7 +683,8 @@ void drawPageSatellites() {
     int barY = y + 10;
 
     tft.setTextColor(TFT_COLOR_TEXT, TFT_COLOR_BG);
-    tft.drawString("Signal Quality:", 10, y, 2);
+    tft.setCursor(10, y);
+    tft.print("Signal Quality:");
 
     tft.drawRect(20, barY, barWidth, barHeight, TFT_COLOR_TEXT);
 
@@ -928,9 +698,11 @@ void drawPageSatellites() {
 
   String hdop = gps.hdop.isValid() ? String(gps.hdop.hdop(), 2) : "--";
   tft.setTextColor(TFT_COLOR_TEXT, TFT_COLOR_BG);
-  tft.drawString("HDOP:", 10, y, 2);
+  tft.setCursor(10, y);
+  tft.print("HDOP:");
   tft.setTextColor(TFT_COLOR_VALUE, TFT_COLOR_BG);
-  tft.drawString(hdop, 140, y, 2);
+  tft.setCursor(140, y);
+  tft.print(hdop);
   y += lineHeight;
 
   tft.setTextColor(TFT_COLOR_TEXT, TFT_COLOR_BG);
@@ -939,13 +711,17 @@ void drawPageSatellites() {
     unsigned long fixDuration = (millis() - gpsFixAcquiredTime) / 1000;
     char fixStr[32];
     sprintf(fixStr, "%lum %lus", fixDuration / 60, fixDuration % 60);
-    tft.drawString("Fix Time:", 10, y, 2);
+    tft.setCursor(10, y);
+    tft.print("Fix Time:");
     tft.setTextColor(TFT_COLOR_VALUE, TFT_COLOR_BG);
-    tft.drawString(fixStr, 10, y + lineHeight, 2);
+    tft.setCursor(10, y + lineHeight);
+    tft.print(fixStr);
   } else {
     tft.setTextColor(TFT_COLOR_ERROR, TFT_COLOR_BG);
-    tft.drawString("Searching for", 10, y, 2);
-    tft.drawString("satellites...", 10, y + lineHeight, 2);
+    tft.setCursor(10, y);
+    tft.print("Searching for");
+    tft.setCursor(10, y + lineHeight);
+    tft.print("satellites...");
   }
 }
 
@@ -961,22 +737,24 @@ void setLedStatus(LedState state, uint32_t color) {
 }
 
 void updateLed() {
+  if (pixelPtr == nullptr) return; // Safety check
+
   switch (ledState) {
     case SOLID:
-      pixel.setPixelColor(0, ledColor);
+      pixelPtr->setPixelColor(0, ledColor);
       break;
     case BLINKING:
       if (millis() - lastBlinkTime > NEOPIXEL_BLINK_INTERVAL) {
         ledOn = !ledOn;
         lastBlinkTime = millis();
       }
-      pixel.setPixelColor(0, ledOn ? ledColor : NEOPIXEL_COLOR_OFF);
+      pixelPtr->setPixelColor(0, ledOn ? ledColor : NEOPIXEL_COLOR_OFF);
       break;
     case OFF:
-      pixel.setPixelColor(0, NEOPIXEL_COLOR_OFF);
+      pixelPtr->setPixelColor(0, NEOPIXEL_COLOR_OFF);
       break;
   }
-  pixel.show();
+  pixelPtr->show();
 }
 
 // ============================================================================
@@ -1060,6 +838,20 @@ String getGPSJson() {
     successRate = ((totalSentences - failedChecksums) * 100.0) / totalSentences;
   }
   doc["successRate"] = String(successRate, 1) + "%";
+
+  // --- GPS Module Information ---
+  doc["gpsModel"] = String(GPS_MODEL);
+  doc["gpsBaud"] = String(GPS_BAUD_RATE) + " bps";
+  doc["gpsRate"] = String(1000.0 / GPS_UPDATE_RATE, 1) + " Hz";
+
+  // --- Board Information ---
+  esp_chip_info_t chip_info;
+  esp_chip_info(&chip_info);
+  doc["chipModel"] = chip_info.model == CHIP_ESP32S3 ? "ESP32-S3" : "Unknown";
+  doc["chipCores"] = chip_info.cores;
+  doc["chipFreq"] = String(ESP.getCpuFreqMHz()) + " MHz";
+  doc["chipMemory"] = String(ESP.getFlashChipSize() / (1024 * 1024)) + "MB Flash / " +
+                     String(ESP.getPsramSize() / (1024 * 1024)) + "MB PSRAM";
 
   String output;
   serializeJson(doc, output);

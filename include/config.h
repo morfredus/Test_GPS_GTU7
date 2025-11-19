@@ -1,26 +1,20 @@
-// Version: 1.2.10
-// ESP32-S3 DevKitC-1 N16R8 - GPS GT-U7 Tester Configuration File
+// Version: 1.5.0
+// ESP32-S3 DevKitC-1 N16R8 - GPS Tester Configuration File
 
 #ifndef CONFIG_H
 #define CONFIG_H
 
 // ============================================================================
-// PROJECT VERSION (Semantic Versioning)
+// PROJECT & BOARD INFORMATION
 // ============================================================================
-#define PROJECT_NAME "GPS GT-U7 Tester"
-#define GPS_MODEL "GT-U7"
+#define PROJECT_NAME "GPS Tester"
 
 // ============================================================================
 // HARDWARE PIN DEFINITIONS - ESP32-S3 DevKitC-1 N16R8
 // ============================================================================
 
 // Light Sensor (ADC)
-#define PIN_LIGHT_SENSOR    6     // S3 safe ADC pin
-
-// TFT ST7789 Display (SPI) - Pins are now defined in platformio.ini
-// PIN_TFT_CS: 5, PIN_TFT_DC: 19, PIN_TFT_RST: 4
-// PIN_TFT_SCL: 11, PIN_TFT_MOSI: 12
-#define PIN_TFT_BL          15    // Backlight pin, must match platformio.ini
+#define PIN_LIGHT_SENSOR    9     // S3 safe ADC pin
 
 // NeoPixel RGB LED
 #define PIN_NEOPIXEL        48    // Onboard RGB LED on ESP32-S3 DevKitC-1
@@ -35,23 +29,33 @@
 #define PIN_BUZZER          3
 #define BUZZER_LEDC_CHANNEL 0     // LEDC channel for the buzzer (0-7)
 
-// GPS GT-U7 (UART 2)
-#define PIN_GPS_RXD         8     // Connects to GPS TX (Moved from 16 to avoid conflict with TOUCH_CS)
-#define PIN_GPS_TXD         7     // Connects to GPS RX (Moved from 17)
-#define PIN_GPS_PPS         38    // Pulse Per Second
-#define GPS_BAUD_RATE       9600  // GT-U7 default baud rate
-
 // I2C Sensors (BME280/OLED)
 #define PIN_I2C_SDA         21    // I2C Data
 #define PIN_I2C_SCL         20    // I2C Clock
 
+
 // ============================================================================
 // TFT DISPLAY SETTINGS
 // ============================================================================
-// TFT_WIDTH and TFT_HEIGHT are now defined in platformio.ini build_flags
-// to properly configure the TFT_eSPI library during compilation.
-#define TFT_ROTATION        0     // 0=Portrait, 1=Landscape, 2=Portrait inverted, 3=Landscape inverted
-#define TFT_BACKLIGHT_PWM   255   // 0-255, 255=full brightness
+// --- Paramètres pour l'écran TFT ST7789 (SPI) ---
+// Le programme est conçu pour fonctionner même si l'écran n'est pas connecté.
+#define TFT_WIDTH           240
+#define TFT_HEIGHT          240
+#define TFT_ROTATION        2     // 0=Portrait, 1=Landscape, 2=Portrait inverted, 3=Landscape inverted
+#define TFT_BACKLIGHT_PWM   255   // Luminosité du rétroéclairage (0-255)
+// --- Matériel Requis (SPI) ---
+// TFT_MOSI (11) -> DIN/SDA sur l'écran
+// TFT_SCLK (12) -> CLK/SCL sur l'écran
+// TFT_CS   (10) -> CS sur l'écran
+// TFT_DC   (6)  -> DC/RS sur l'écran
+// TFT_RST  (7)  -> RST sur l'écran
+// TFT_BL   (15) -> BLK/LED sur l'écran
+#define TFT_MOSI            11
+#define TFT_SCLK            12
+#define TFT_CS              10
+#define TFT_DC              6
+#define TFT_RST             7
+#define TFT_BL              15
 
 // TFT Colors (RGB565 format)
 #define TFT_COLOR_BG        0x0000  // Black
@@ -62,6 +66,12 @@
 #define TFT_COLOR_ERROR     0xF800  // Red
 #define TFT_COLOR_SEPARATOR 0x4208  // Dark Gray
 
+// --- Tailles de police (pour Adafruit GFX) ---
+// Centralise les tailles de police pour une modification facile.
+#define FONT_SIZE_DEFAULT   1     // Taille par défaut pour la plupart des textes
+#define FONT_SIZE_HEADER    1     // Taille pour les textes du bandeau
+#define FONT_SIZE_INIT      3     // Taille pour le message d'initialisation (réduit pour tenir)
+
 // Display pages
 #define NUM_PAGES           3
 #define PAGE_GPS_DATA       0
@@ -71,9 +81,28 @@
 // ============================================================================
 // GPS SETTINGS
 // ============================================================================
+// --- GPS Module Selection ---
+// Décommentez le module que vous utilisez. Les paramètres (modèle, baudrate) seront ajustés.
+#define GPS_MODULE_GT_U7
+// #define GPS_MODULE_NEO_6M
+
+// --- GPS Module Configuration ---
+#if defined(GPS_MODULE_GT_U7)
+  #define GPS_MODEL "GT-U7"
+  #define GPS_BAUD_RATE 9600
+#elif defined(GPS_MODULE_NEO_6M)
+  #define GPS_MODEL "NEO-6M"
+  #define GPS_BAUD_RATE 9600 // Peut aussi être 38400 ou 57600
+#endif
+
+// --- Broches de connexion GPS (UART 2) ---
+#define PIN_GPS_RXD         8     // Connects to GPS TX
+#define PIN_GPS_TXD         5     // Connects to GPS RX
+#define PIN_GPS_PPS         38    // Pulse Per Second
 #define GPS_UPDATE_RATE     1000  // Update display every 1000ms (1 Hz)
 #define GPS_TIMEOUT         5000  // GPS data timeout in ms
 #define GPS_FIX_TIMEOUT     60000 // Time to wait for fix before warning (60s)
+#define HDOP_GOOD_THRESHOLD 2.0   // HDOP value below which the fix is considered "good"
 
 // ============================================================================
 // WIFI SETTINGS
@@ -110,7 +139,7 @@
 // ============================================================================
 // TFT sprite buffer size - Careful with PSRAM allocation
 // ESP32-S3 N16R8 has 8MB PSRAM, but be conservative
-// Full screen sprite would be 240*320*2 = 153,600 bytes
+// Full screen sprite would be 240*240*2 = 115,200 bytes
 // We'll use partial screen sprites to avoid bootloop
 #define USE_TFT_SPRITE      false  // Set to true to use sprites (needs testing)
 #define SPRITE_HEIGHT       80     // Height of sprite buffer (if used)
