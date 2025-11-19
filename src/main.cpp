@@ -237,7 +237,7 @@ void setupGPS() {
 // ============================================================================
 void setupWiFi() {
   updateLed(); // Show blue color
-  drawInitScreen("Searching for WiFi...");
+  drawInitScreen("Searching" , "for WiFi...");
   DEBUG_PRINTLN("Connecting to WiFi...");
 
   WiFi.mode(WIFI_STA);
