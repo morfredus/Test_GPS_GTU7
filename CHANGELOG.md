@@ -5,6 +5,35 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.8.2] - 2024-05-27
+
+### Fixed
+- Corrected NeoPixel LED blinking behavior during GPS search. The LED now correctly blinks green when searching for a fix.
+- Updated project version to 1.8.2.
+
+## [1.8.1] - 2024-05-27
+
+### Changed
+- **Web UI**: Replaced browser popups (`alert`, `confirm`) with a modern, non-blocking inline notification system for user actions (e.g., GPS reset).
+- Updated project version to 1.8.1.
+
+## [1.8.0] - 2024-05-27
+
+### Added
+- **Web UI Overhaul**: Implemented a modern, interactive, and responsive web interface.
+- **Detailed GPS Data**: Displayed Latitude, Longitude, Altitude, Speed, Course, Satellites, HDOP, Age, UTC Date/Time.
+- **GPS Statistics**: Added Valid Sentences, Failed Checksums, Total Chars Processed, and Success Rate.
+- **GPS Module Info**: Included GPS Model, Baud Rate, and Update Rate.
+- **ESP32 System Info**: Displayed Chip Model, Cores, CPU Frequency, Flash, and PSRAM memory.
+- **Uptime**: Showed device uptime.
+- **Interactive Features**:
+  - Real-time data updates via WebSockets.
+  - Visual GPS fix status indicator (green/red badge).
+  - "View on Google Maps" button for current coordinates.
+  - "Reset GPS Module" button for remote reset.
+  - Last data update timestamp.
+- Updated project version to 1.8.0.
+
 ## [1.7.3] - 2024-05-27
 
 ### Changed
