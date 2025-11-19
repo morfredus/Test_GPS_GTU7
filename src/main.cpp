@@ -14,7 +14,7 @@
 #include <Adafruit_NeoPixel.h>
 #include "config.h"
 #include "webpage.h" // Externalized web page content
-#include "DrSugiyama_Regular.h" // Custom font for startup
+#include "DrSugiyama_Regular28pt7b.h" // Custom font for startup
 #include "secrets.h"
 
 // ============================================================================
@@ -171,7 +171,7 @@ void drawInitScreen(const String& line1, const String& line2, const String& line
   tft.fillScreen(TFT_COLOR_BG);
 
   // --- Draw Title ("morfredus") with custom font ---
-  tft.setFont(&DrSugiyama_Regular);
+  tft.setFont(&DrSugiyama_Regular28pt7b);
   tft.setTextColor(TFT_COLOR_WARNING);
   tft.setTextSize(1.8); // Augmentation de la taille de la police personnalisée
   int16_t x1, y1;
