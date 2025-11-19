@@ -1,4 +1,4 @@
-// Version: 1.4.2
+// Version: 1.3.2
 // ESP32-S3 DevKitC-1 N16R8 - GPS GT-U7 Tester
 // Main Application File
 
@@ -14,7 +14,7 @@
 #include <Adafruit_NeoPixel.h>
 #include "config.h"
 #include "webpage.h" // Externalized web page content
-#include "DrSugiyama_Regular28pt7b.h" // Police personnalisée pour le démarrage
+#include "DrSugiyama_Regular.h" // Custom font for startup
 #include "secrets.h"
 
 // ============================================================================
@@ -28,8 +28,9 @@ AsyncWebServer server(WEB_SERVER_PORT);
 AsyncWebSocket ws("/ws");
 Adafruit_NeoPixel *pixelPtr = nullptr;
 
-// Macro globale pour un accès simplifié à l'objet TFT via son pointeur
+// Helper macro to access TFT (for easy migration back if needed)
 #define tft (*tftPtr)
+
 
 // ============================================================================
 // GLOBAL VARIABLES
@@ -44,7 +45,6 @@ unsigned long gpsFixAcquiredTime = 0;
 bool previousFixStatus = false;
 bool wifiConnected = false;
 String ipAddress = "";
-bool displayAvailable = false;
 bool webServerSetupDone = false;
 int connectedClients = 0;
 
@@ -65,6 +65,7 @@ uint32_t validSentences = 0;
 // FUNCTION PROTOTYPES
 // ============================================================================
 void setupPins();
+void setupSerial();
 void setupDisplay();
 void setupWiFi();
 void setupWebServer();
@@ -76,7 +77,6 @@ void drawHeader();
 void drawPageGPSData();
 void drawPageDiagnostics();
 void drawPageSatellites();
-
 void setLedStatus(LedState state, uint32_t color);
 void updateLed();
 void playTone(int frequency, int duration);
@@ -157,17 +157,23 @@ void setupPins() {
 }
 
 // ============================================================================
+// SERIAL SETUP (Now called from setup() directly)
+// ============================================================================
+void setupSerial() {
+  // This function is no longer needed as Serial is initialized in setup()
+  // Kept for backwards compatibility
+}
+
+// ============================================================================
 // DRAW INITIALIZATION SCREEN
 // ============================================================================
 void drawInitScreen(const String& line1, const String& line2, const String& line3) {
-  if (!displayAvailable) return;
-
   tft.fillScreen(TFT_COLOR_BG);
 
   // --- Draw Title ("morfredus") with custom font ---
-  tft.setFont(&DrSugiyama_Regular28pt7b);
+  tft.setFont(&DrSugiyama_Regular);
   tft.setTextColor(TFT_COLOR_WARNING);
-  tft.setTextSize(1); // Augmentation de la taille de la police personnalisée
+  tft.setTextSize(1.8); // Augmentation de la taille de la police personnalisée
   int16_t x1, y1;
   uint16_t w, h;
   tft.getTextBounds("morfredus", 0, 0, &x1, &y1, &w, &h);
@@ -196,21 +202,23 @@ void drawInitScreen(const String& line1, const String& line2, const String& line
 // ============================================================================
 void setupDisplay() {
   updateLed(); // Show blue color
-
-  DEBUG_PRINTLN("Initializing TFT ST7789 display...");
+  DEBUG_PRINTLN("Initializing TFT display...");
+  
+  // Création dynamique de l'objet TFT pour éviter les crashs d'initialisation précoce
+  // Assurez-vous que TFT_CS, TFT_DC, TFT_RST sont définis dans config.h
   tftPtr = new Adafruit_ST7789(TFT_CS, TFT_DC, TFT_RST);
-  if (tftPtr != nullptr) {
-    tftPtr->init(TFT_WIDTH, TFT_HEIGHT);
-    tftPtr->setRotation(TFT_ROTATION);
-    tftPtr->fillScreen(TFT_COLOR_BG);
-    tftPtr->setTextWrap(false);
-    displayAvailable = true;
-    drawInitScreen("Initializing...");
-    DEBUG_PRINTLN("TFT display initialized");
-  } else {
+  if (tftPtr == nullptr) {
     DEBUG_PRINTLN("ERROR: Failed to allocate TFT object!");
-    displayAvailable = false;
+    return;
   }
+
+  tft.init(TFT_WIDTH, TFT_HEIGHT);
+  tft.setRotation(TFT_ROTATION);
+  tft.fillScreen(TFT_COLOR_BG);
+  tft.setTextColor(TFT_COLOR_TEXT, TFT_COLOR_BG);
+  tft.setTextWrap(false);
+  drawInitScreen("Initializing...");
+  DEBUG_PRINTLN("TFT display initialized");
 }
 
 // ============================================================================
@@ -229,14 +237,17 @@ void setupGPS() {
 // ============================================================================
 void setupWiFi() {
   updateLed(); // Show blue color
-  if (displayAvailable) drawInitScreen("Searching for", "WiFi..."); // Texte sur deux lignes
+  drawInitScreen("Searching for WiFi...");
   DEBUG_PRINTLN("Connecting to WiFi...");
 
   WiFi.mode(WIFI_STA);
   wifiMulti.addAP(WIFI_SSID_1, WIFI_PASSWORD_1);
   wifiMulti.addAP(WIFI_SSID_2, WIFI_PASSWORD_2);
 
-  ipAddress = "Connecting..."; // Statut initial
+  // La connexion est maintenant gérée de manière non bloquante dans la loop()
+  // On lance juste la première tentative ici.
+  wifiMulti.run();
+  ipAddress = "Connecting...";
   DEBUG_PRINTLN("WiFi connection process started...");
 }
 
@@ -292,32 +303,36 @@ void onWebSocketEvent(AsyncWebSocket *server, AsyncWebSocketClient *client,
 // MAIN LOOP
 // ============================================================================
 void loop() {
-  static unsigned long lastWifiCheck = 0;
+  static unsigned long wifiConnectStart = millis();
 
   // --- Gestion de la connexion WiFi (non-bloquant) ---
-  if (!wifiConnected && millis() - lastWifiCheck > WIFI_RETRY_DELAY) {
-    if (wifiMulti.run() == WL_CONNECTED) { // Tentative de connexion
-        DEBUG_PRINTLN(">>> WiFi connection successful!");
-        wifiConnected = true;
-        ipAddress = WiFi.localIP().toString();
-        DEBUG_PRINTLN("\nWiFi connected!");
-        DEBUG_PRINT("IP address: "); DEBUG_PRINTLN(ipAddress);
-        DEBUG_PRINT("Connected to: "); DEBUG_PRINTLN(WiFi.SSID());
-        if (displayAvailable) {
-            drawInitScreen("Connected to:", WiFi.SSID(), "IP: " + ipAddress);
-            delay(2000); // Pause pour montrer l'IP
-        }
-        setLedStatus(BLINKING, NEOPIXEL_COLOR_RED); // Commence la recherche GPS
-        playTone(BUZZER_FREQ_FIX, BUZZER_DURATION);
-
-        // Initialisation du serveur web (une seule fois)
-        if (!webServerSetupDone) {
-            DEBUG_PRINTLN(">>> WiFi is connected, proceeding to web server setup...");
-            setupWebServer();
-            webServerSetupDone = true;
-        }
+  if (!wifiConnected) {
+    if (wifiMulti.run() == WL_CONNECTED) {
+      DEBUG_PRINTLN(">>> WiFi connection successful!");
+      wifiConnected = true;
+      ipAddress = WiFi.localIP().toString();
+      DEBUG_PRINTLN("\nWiFi connected!");
+      DEBUG_PRINT("IP address: "); DEBUG_PRINTLN(ipAddress);
+      DEBUG_PRINT("Connected to: "); DEBUG_PRINTLN(WiFi.SSID());
+      drawInitScreen("Connected to:", WiFi.SSID(), "IP: " + ipAddress);
+      delay(2000); // Pause for 2 seconds as requested
+      setLedStatus(BLINKING, NEOPIXEL_COLOR_GREEN); // Start searching for GPS (green blinking)
+      playTone(BUZZER_FREQ_FIX, BUZZER_DURATION);
+    } else if (millis() - wifiConnectStart > WIFI_CONNECT_TIMEOUT) {
+      // Timeout de connexion
+      ipAddress = "No WiFi";
+      DEBUG_PRINTLN("\nWiFi connection failed (timeout)!");
+      setLedStatus(SOLID, NEOPIXEL_COLOR_RED); // Error state
+      playTone(BUZZER_FREQ_LOST, BUZZER_DURATION * 2);
+      wifiConnectStart = millis(); // Évite de retenter immédiatement
     }
-    lastWifiCheck = millis();
+  }
+
+  // --- Initialisation du serveur web (une fois le WiFi connecté) ---
+  if (wifiConnected && !webServerSetupDone) {
+    DEBUG_PRINTLN(">>> WiFi is connected, proceeding to web server setup...");
+    setupWebServer();
+    webServerSetupDone = true;
   }
 
   // --- Tâches principales ---
@@ -380,27 +395,28 @@ void updateGPS() {
 
   bool currentFixStatus = gps.location.isValid() && gps.location.age() < GPS_TIMEOUT;
 
-  if (currentFixStatus) {
-    // --- We have a GPS fix ---
+  // --- Gestion de l'état de la LED en fonction du GPS ---
+  if (wifiConnected && millis() - lastGPSData > GPS_TIMEOUT && lastGPSData != 0) {
+    // Erreur : Aucune donnée GPS reçue depuis un certain temps
+    setLedStatus(SOLID, NEOPIXEL_COLOR_RED);
+    if (previousFixStatus) { // Si on vient de perdre le fix à cause du timeout
+      DEBUG_PRINTLN("GPS FIX LOST (Timeout)!");
+      if (BUZZER_ENABLED) playTone(BUZZER_FREQ_LOST, BUZZER_DURATION * 2);
+      ws.textAll(getGPSJson());
+    }
+  } else if (currentFixStatus) {
+    // Fix GPS acquis et valide
+    setLedStatus(SOLID, NEOPIXEL_COLOR_GREEN);
     if (!previousFixStatus) {
-      // This is the moment we just acquired the fix
       DEBUG_PRINTLN("GPS FIX ACQUIRED!");
       gpsFixAcquiredTime = millis();
-      if (BUZZER_ENABLED) {
-        playTone(BUZZER_FREQ_FIX, BUZZER_DURATION);
-      }
-      ws.textAll(getGPSJson()); // Send immediate update on fix acquired
-    }
-    // Check precision for LED color
-    if (gps.hdop.isValid() && gps.hdop.hdop() < HDOP_GOOD_THRESHOLD) {
-      setLedStatus(SOLID, NEOPIXEL_COLOR_GREEN); // Good precision
-    } else {
-      setLedStatus(SOLID, NEOPIXEL_COLOR_BLUE); // Fix OK, but precision is not optimal
+      if (BUZZER_ENABLED) playTone(BUZZER_FREQ_FIX, BUZZER_DURATION);
+      ws.textAll(getGPSJson());
     }
   } else {
-    // --- No GPS fix ---
+    // Pas de fix, en recherche (si le WiFi est connecté)
+    if (wifiConnected) setLedStatus(BLINKING, NEOPIXEL_COLOR_GREEN);
     if (previousFixStatus) {
-      // This is the moment we just lost the fix
       DEBUG_PRINTLN("GPS FIX LOST!");
       if (BUZZER_ENABLED) {
         playTone(BUZZER_FREQ_LOST, BUZZER_DURATION * 2);
@@ -415,18 +431,24 @@ void updateGPS() {
 // DISPLAY UPDATE
 // ============================================================================
 void updateDisplay() {
-  if (!displayAvailable) return;
-
   if (millis() - lastDisplayUpdate < GPS_UPDATE_RATE) {
     return;
   }
+
   lastDisplayUpdate = millis();
 
-  drawHeader(); // Common header for all pages
+  drawHeader();
+
   switch (currentPage) {
-    case PAGE_GPS_DATA:      drawPageGPSData();      break;
-    case PAGE_DIAGNOSTICS:   drawPageDiagnostics();  break;
-    case PAGE_SATELLITES:    drawPageSatellites();   break;
+    case PAGE_GPS_DATA:
+      drawPageGPSData();
+      break;
+    case PAGE_DIAGNOSTICS:
+      drawPageDiagnostics();
+      break;
+    case PAGE_SATELLITES:
+      drawPageSatellites();
+      break;
   }
 }
 
@@ -434,7 +456,6 @@ void updateDisplay() {
 // DRAW HEADER
 // ============================================================================
 void drawHeader() {
-  if (!displayAvailable) return;
   tft.fillRect(0, 0, TFT_WIDTH, 100, TFT_COLOR_HEADER);
   tft.setTextSize(FONT_SIZE_HEADER);
 
