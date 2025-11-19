@@ -1,5 +1,5 @@
-// Version: 1.3.2
-// ESP32-S3 DevKitC-1 N16R8 - GPS GT-U7 Tester
+// Version: 1.7.3
+// ESP32-S3 DevKitC-1 N16R8 - GPS GT-U7 Tester - TFT Display Enhancements
 // Main Application File
 
 #include <Arduino.h>
@@ -47,6 +47,12 @@ bool wifiConnected = false;
 String ipAddress = "";
 bool webServerSetupDone = false;
 int connectedClients = 0;
+
+// --- Display Layout Constants (consider moving to config.h) ---
+const int TFT_HEADER_HEIGHT = 60; // Reduced header height
+const int TFT_PAGE_START_Y = TFT_HEADER_HEIGHT + 1; // Y-start for page content
+const int TFT_LINE_HEIGHT = 20; // Line spacing for font size 2
+
 
 // NeoPixel status variables
 enum LedState { OFF, SOLID, BLINKING };
@@ -183,15 +189,14 @@ void drawInitScreen(const String& line1, const String& line2, const String& line
   // --- Draw Subtitle ("GPS Tester") ---
   tft.setFont(); // Reset to default font
   tft.setTextSize(3);
-  tft.setTextColor(TFT_COLOR_HEADER);
+  tft.setTextColor(TFT_COLOR_TEXT); // Changed to TEXT for consistency with other status messages
   tft.getTextBounds("GPS Tester", 0, 0, &x1, &y1, &w, &h);
   tft.setCursor((TFT_WIDTH - w) / 2, 95);
   tft.print("GPS Tester");
 
   // --- Draw status lines with default font ---
-  tft.setTextSize(2);
   tft.setTextColor(TFT_COLOR_TEXT);
-  // Centrer les lignes de statut pour un meilleur look
+  tft.setTextSize(2); // Reverted to original size 2
   tft.getTextBounds(line1, 0, 0, &x1, &y1, &w, &h); tft.setCursor((TFT_WIDTH - w) / 2, 150); tft.print(line1);
   tft.getTextBounds(line2, 0, 0, &x1, &y1, &w, &h); tft.setCursor((TFT_WIDTH - w) / 2, 180); tft.print(line2);
   tft.getTextBounds(line3, 0, 0, &x1, &y1, &w, &h); tft.setCursor((TFT_WIDTH - w) / 2, 210); tft.print(line3);
@@ -456,132 +461,115 @@ void updateDisplay() {
 // DRAW HEADER
 // ============================================================================
 void drawHeader() {
-  tft.fillRect(0, 0, TFT_WIDTH, 100, TFT_COLOR_HEADER);
-  tft.setTextSize(FONT_SIZE_HEADER);
+  tft.fillRect(0, 0, TFT_WIDTH, TFT_HEADER_HEIGHT, TFT_COLOR_HEADER);
 
   int16_t x1, y1;
   uint16_t w, h;
   
+  // Project Name (Title)
+  tft.setTextSize(2); // Increased font size for header title
   tft.setTextColor(TFT_COLOR_TEXT, TFT_COLOR_HEADER);
   tft.getTextBounds(PROJECT_NAME, 0, 0, &x1, &y1, &w, &h);
-  tft.setCursor((TFT_WIDTH - w) / 2, 5);
+  tft.setCursor((TFT_WIDTH - w) / 2, 5); // Centered, 5px from top
   tft.print(PROJECT_NAME);
 
-  String modelStr = "Model: " + String(GPS_MODEL);
-  tft.getTextBounds(modelStr, 0, 0, &x1, &y1, &w, &h);
-  tft.setCursor((TFT_WIDTH - w) / 2, 25);
-  tft.print(modelStr);
-
+  // GPS Status (centered)
+  tft.setTextSize(2);
   bool hasFix = gps.location.isValid() && gps.location.age() < GPS_TIMEOUT;
   String status = hasFix ? "FIX OK" : "NO FIX";
   uint16_t statusColor = hasFix ? TFT_COLOR_VALUE : TFT_COLOR_ERROR;
   tft.setTextColor(statusColor, TFT_COLOR_HEADER);
   String statusStr = "Status: " + status;
   tft.getTextBounds(statusStr, 0, 0, &x1, &y1, &w, &h);
-  tft.setCursor((TFT_WIDTH - w) / 2, 45);
+  tft.setCursor((TFT_WIDTH - w) / 2, 28); // Centered, below title
   tft.print(statusStr);
   
-  tft.setTextColor(TFT_COLOR_TEXT, TFT_COLOR_HEADER);
-  tft.setCursor(5, 70);
-  tft.print("IP:");
-
+  // IP Address
+  tft.setTextSize(1);
   if (!wifiConnected && ipAddress == "Connecting...") {
       tft.setTextColor(TFT_COLOR_WARNING, TFT_COLOR_HEADER);
   } else {
       tft.setTextColor(TFT_COLOR_TEXT, TFT_COLOR_HEADER);
   }
   tft.getTextBounds(ipAddress, 0, 0, &x1, &y1, &w, &h);
-  tft.setCursor(TFT_WIDTH - 5 - w, 70);
+  tft.setCursor(TFT_WIDTH - 5 - w, 45); // Right-aligned, moved down
   tft.print(ipAddress);
 
-  tft.drawFastHLine(0, 100, TFT_WIDTH, TFT_COLOR_SEPARATOR);
+  tft.drawFastHLine(0, TFT_HEADER_HEIGHT, TFT_WIDTH, TFT_COLOR_SEPARATOR);
 }
 
 // ============================================================================
 // DRAW PAGE: GPS DATA
 // ============================================================================
 void drawPageGPSData() {
-  int y = 110;
-  int lineHeight = 22;
-
-  tft.fillRect(0, 101, TFT_WIDTH, TFT_HEIGHT - 101, TFT_COLOR_BG);
-  tft.setTextSize(FONT_SIZE_DEFAULT);
+  int y = TFT_PAGE_START_Y + 5;
+  
+  tft.fillRect(0, TFT_PAGE_START_Y, TFT_WIDTH, TFT_HEIGHT - TFT_PAGE_START_Y, TFT_COLOR_BG);
+  
+  tft.setTextSize(2); // Increased font size for page title
 
   int16_t x1, y1;
   uint16_t w, h;
   String pageTitle = "GPS DATA";
   tft.setTextColor(TFT_COLOR_WARNING, TFT_COLOR_BG);
   tft.getTextBounds(pageTitle, 0, 0, &x1, &y1, &w, &h);
-  tft.setCursor((TFT_WIDTH - w) / 2, y);
+  tft.setCursor((TFT_WIDTH - w) / 2, y); // Centered
   tft.print(pageTitle);
-  y += lineHeight + 5;
+  y += TFT_LINE_HEIGHT + 5;
 
+  tft.setTextSize(2); // Increased font size for data
   tft.setTextColor(TFT_COLOR_TEXT, TFT_COLOR_BG);
 
+  // Lat / Lng on same line
   String lat = gps.location.isValid() ? String(gps.location.lat(), 6) : "--";
-  tft.setCursor(10, y);
-  tft.print("Lat: ");
-  tft.setTextColor(TFT_COLOR_VALUE, TFT_COLOR_BG);
-  tft.setCursor(60, y);
-  tft.print(lat);
-  y += lineHeight;
-
-  tft.setTextColor(TFT_COLOR_TEXT, TFT_COLOR_BG);
   String lng = gps.location.isValid() ? String(gps.location.lng(), 6) : "--";
-  tft.setCursor(10, y);
-  tft.print("Lng: ");
+  tft.setCursor(5, y); tft.print("Lat:");
   tft.setTextColor(TFT_COLOR_VALUE, TFT_COLOR_BG);
-  tft.setCursor(60, y);
-  tft.print(lng);
-  y += lineHeight;
+  tft.setCursor(65, y); tft.print(lat.substring(0, 7)); // Truncate for space
+  y += TFT_LINE_HEIGHT;
+  tft.setCursor(5, y); tft.print("Lng:");
+  tft.setTextColor(TFT_COLOR_VALUE, TFT_COLOR_BG);
+  tft.setCursor(65, y); tft.print(lng.substring(0, 7)); // Truncate for space
+  y += TFT_LINE_HEIGHT;
 
+  // Alt / Sats on same line
   tft.setTextColor(TFT_COLOR_TEXT, TFT_COLOR_BG);
   String alt = gps.altitude.isValid() ? String(gps.altitude.meters(), 1) + "m" : "--";
-  tft.setCursor(10, y);
-  tft.print("Alt: ");
+  String sats = String(gps.satellites.value());
+  tft.setCursor(5, y); tft.print("Alt:");
   tft.setTextColor(TFT_COLOR_VALUE, TFT_COLOR_BG);
-  tft.setCursor(60, y);
-  tft.print(alt);
-  y += lineHeight;
+  tft.setCursor(65, y); tft.print(alt);
+  tft.setTextColor(TFT_COLOR_TEXT, TFT_COLOR_BG);
+  tft.setCursor(150, y); tft.print("Sats:");
+  tft.setTextColor(TFT_COLOR_VALUE, TFT_COLOR_BG);
+  tft.setCursor(210, y); tft.print(sats);
+  y += TFT_LINE_HEIGHT;
 
+  // Speed / Course on same line
   tft.setTextColor(TFT_COLOR_TEXT, TFT_COLOR_BG);
   String spd = gps.speed.isValid() ? String(gps.speed.kmph(), 1) + "km/h" : "--";
-  tft.setCursor(10, y);
-  tft.print("Speed:");
-  tft.setTextColor(TFT_COLOR_VALUE, TFT_COLOR_BG);
-  tft.setCursor(80, y);
-  tft.print(spd);
-  y += lineHeight;
-
-  tft.setTextColor(TFT_COLOR_TEXT, TFT_COLOR_BG);
   String crs = gps.course.isValid() ? String(gps.course.deg(), 1) + "°" : "--";
-  tft.setCursor(10, y);
-  tft.print("Course:");
+  tft.setCursor(5, y); tft.print("Spd:");
   tft.setTextColor(TFT_COLOR_VALUE, TFT_COLOR_BG);
-  tft.setCursor(80, y);
-  tft.print(crs);
-  y += lineHeight;
-
+  tft.setCursor(65, y); tft.print(spd);
   tft.setTextColor(TFT_COLOR_TEXT, TFT_COLOR_BG);
-  String sats = String(gps.satellites.value());
-  tft.setCursor(10, y);
-  tft.print("Sats:");
+  tft.setCursor(150, y); tft.print("Crs:");
   tft.setTextColor(TFT_COLOR_VALUE, TFT_COLOR_BG);
-  tft.setCursor(80, y);
-  tft.print(sats);
-  y += lineHeight;
+  tft.setCursor(210, y); tft.print(crs);
+  y += TFT_LINE_HEIGHT;
 
+  // UTC Time and Date
   if (gps.date.isValid() && gps.time.isValid()) {
     tft.setTextColor(TFT_COLOR_TEXT, TFT_COLOR_BG);
     char dateStr[32];
     sprintf(dateStr, "%02d/%02d/%04d %02d:%02d:%02d",
             gps.date.day(), gps.date.month(), gps.date.year(),
             gps.time.hour(), gps.time.minute(), gps.time.second());
-    tft.setCursor(10, y);
+    tft.setCursor(5, y);
     tft.print("UTC:");
     tft.setTextColor(TFT_COLOR_VALUE, TFT_COLOR_BG);
-    tft.setCursor(10, y + lineHeight);
-    tft.print(dateStr);
+    tft.setCursor(65, y);
+    tft.print(String(dateStr).substring(11)); // Time only, skipping the space
   }
 }
 
@@ -589,84 +577,80 @@ void drawPageGPSData() {
 // DRAW PAGE: DIAGNOSTICS
 // ============================================================================
 void drawPageDiagnostics() {
-  int y = 110;
-  int lineHeight = 22;
-
-  tft.fillRect(0, 101, TFT_WIDTH, TFT_HEIGHT - 101, TFT_COLOR_BG);
-  tft.setTextSize(FONT_SIZE_DEFAULT);
+  int y = TFT_PAGE_START_Y + 5;
+  
+  tft.fillRect(0, TFT_PAGE_START_Y, TFT_WIDTH, TFT_HEIGHT - TFT_PAGE_START_Y, TFT_COLOR_BG);
+  
+  tft.setTextSize(2); // Increased font size for page title
 
   int16_t x1, y1;
   uint16_t w, h;
   String pageTitle = "DIAGNOSTICS";
   tft.setTextColor(TFT_COLOR_WARNING, TFT_COLOR_BG);
   tft.getTextBounds(pageTitle, 0, 0, &x1, &y1, &w, &h);
-  tft.setCursor((TFT_WIDTH - w) / 2, y);
+  tft.setCursor((TFT_WIDTH - w) / 2, y); // Centered
   tft.print(pageTitle);
-  y += lineHeight + 5;
+  y += TFT_LINE_HEIGHT + 5;
 
+  tft.setTextSize(2); // Increased font size for data
   tft.setTextColor(TFT_COLOR_TEXT, TFT_COLOR_BG);
-  tft.setCursor(10, y);
-  tft.print("Valid:");
+
+  // GPS Model
+  tft.setCursor(5, y); tft.print("Model:");
   tft.setTextColor(TFT_COLOR_VALUE, TFT_COLOR_BG);
-  tft.setCursor(120, y);
-  tft.print(String(validSentences));
-  y += lineHeight;
+  tft.setCursor(100, y); tft.print(String(GPS_MODEL));
+  y += TFT_LINE_HEIGHT;
 
+  // Valid Sentences
   tft.setTextColor(TFT_COLOR_TEXT, TFT_COLOR_BG);
-  tft.setCursor(10, y);
-  tft.print("Failed:");
+  tft.setCursor(5, y); tft.print("Valid:");
+  tft.setTextColor(TFT_COLOR_VALUE, TFT_COLOR_BG);
+  tft.setCursor(100, y); tft.print(String(validSentences));
+  y += TFT_LINE_HEIGHT;
+
+  // Failed Checksums
+  tft.setTextColor(TFT_COLOR_TEXT, TFT_COLOR_BG);
+  tft.setCursor(5, y); tft.print("Failed:");
   tft.setTextColor(failedChecksums > 0 ? TFT_COLOR_ERROR : TFT_COLOR_VALUE, TFT_COLOR_BG);
-  tft.setCursor(120, y);
-  tft.print(String(failedChecksums));
-  y += lineHeight;
+  tft.setCursor(100, y); tft.print(String(failedChecksums));
+  y += TFT_LINE_HEIGHT;
 
-  tft.setTextColor(TFT_COLOR_TEXT, TFT_COLOR_BG);
-  tft.setCursor(10, y);
-  tft.print("Chars:");
-  tft.setTextColor(TFT_COLOR_VALUE, TFT_COLOR_BG);
-  tft.setCursor(120, y);
-  tft.print(String(gps.charsProcessed()));
-  y += lineHeight;
-
+  // Success Rate
   float successRate = 0;
   if (totalSentences > 0) {
     successRate = ((totalSentences - failedChecksums) * 100.0) / totalSentences;
   }
   tft.setTextColor(TFT_COLOR_TEXT, TFT_COLOR_BG);
-  tft.setCursor(10, y);
-  tft.print("Success:");
+  tft.setCursor(5, y); tft.print("Success:");
   tft.setTextColor(successRate > 95 ? TFT_COLOR_VALUE : TFT_COLOR_WARNING, TFT_COLOR_BG);
-  tft.setCursor(120, y);
-  tft.print(String(successRate, 1) + "%");
-  y += lineHeight;
+  tft.setCursor(120, y); tft.print(String(successRate, 1) + "%");
+  y += TFT_LINE_HEIGHT;
 
+  // HDOP
   tft.setTextColor(TFT_COLOR_TEXT, TFT_COLOR_BG);
   String hdop = gps.hdop.isValid() ? String(gps.hdop.hdop(), 2) : "--";
-  tft.setCursor(10, y);
-  tft.print("HDOP:");
+  tft.setCursor(5, y); tft.print("HDOP:");
   tft.setTextColor(TFT_COLOR_VALUE, TFT_COLOR_BG);
-  tft.setCursor(120, y);
-  tft.print(hdop);
-  y += lineHeight;
+  tft.setCursor(80, y); tft.print(hdop);
+  y += TFT_LINE_HEIGHT;
 
+  // Age
   tft.setTextColor(TFT_COLOR_TEXT, TFT_COLOR_BG);
   unsigned long age = gps.location.age();
   String ageStr = age < 1000 ? String(age) + "ms" : String(age / 1000) + "s";
-  tft.setCursor(10, y);
-  tft.print("Age:");
+  tft.setCursor(5, y); tft.print("Age:");
   tft.setTextColor(age < GPS_TIMEOUT ? TFT_COLOR_VALUE : TFT_COLOR_ERROR, TFT_COLOR_BG);
-  tft.setCursor(120, y);
-  tft.print(ageStr);
-  y += lineHeight;
+  tft.setCursor(80, y); tft.print(ageStr);
+  y += TFT_LINE_HEIGHT;
 
+  // Uptime
   tft.setTextColor(TFT_COLOR_TEXT, TFT_COLOR_BG);
-  tft.setCursor(10, y);
-  tft.print("Uptime:");
+  tft.setCursor(5, y); tft.print("Uptime:");
   tft.setTextColor(TFT_COLOR_VALUE, TFT_COLOR_BG);
   unsigned long uptime = millis() / 1000;
   char uptimeStr[32];
-  sprintf(uptimeStr, "%luh %lum %lus", uptime / 3600, (uptime % 3600) / 60, uptime % 60);
-  tft.setCursor(10, y + lineHeight);
+  sprintf(uptimeStr, "%luh%lum%lus", uptime / 3600, (uptime % 3600) / 60, uptime % 60);
+  tft.setCursor(100, y);
   tft.print(uptimeStr);
 }
 
@@ -674,75 +658,70 @@ void drawPageDiagnostics() {
 // DRAW PAGE: SATELLITES
 // ============================================================================
 void drawPageSatellites() {
-  int y = 110;
-  int lineHeight = 22;
-
-  tft.fillRect(0, 101, TFT_WIDTH, TFT_HEIGHT - 101, TFT_COLOR_BG);
-  tft.setTextSize(FONT_SIZE_DEFAULT);
+  int y = TFT_PAGE_START_Y + 5;
+  
+  tft.fillRect(0, TFT_PAGE_START_Y, TFT_WIDTH, TFT_HEIGHT - TFT_PAGE_START_Y, TFT_COLOR_BG);
+  
+  tft.setTextSize(2); // Increased font size for page title
 
   int16_t x1, y1;
   uint16_t w, h;
   String pageTitle = "SATELLITES";
   tft.setTextColor(TFT_COLOR_WARNING, TFT_COLOR_BG);
   tft.getTextBounds(pageTitle, 0, 0, &x1, &y1, &w, &h);
-  tft.setCursor((TFT_WIDTH - w) / 2, y);
+  tft.setCursor((TFT_WIDTH - w) / 2, y); // Centered
   tft.print(pageTitle);
-  y += lineHeight + 5;
+  y += TFT_LINE_HEIGHT + 5;
 
+  tft.setTextSize(2); // Increased font size for data
   tft.setTextColor(TFT_COLOR_TEXT, TFT_COLOR_BG);
-  tft.setCursor(10, y);
-  tft.print("Satellites:");
+
+  // Satellites
+  tft.setCursor(5, y); tft.print("Sats:");
   tft.setTextColor(TFT_COLOR_VALUE, TFT_COLOR_BG);
   uint32_t satCount = gps.satellites.value();
-  tft.setCursor(140, y);
-  tft.print(String(satCount));
-  y += lineHeight;
+  tft.setCursor(80, y); tft.print(String(satCount));
+  y += TFT_LINE_HEIGHT;
 
-  if (satCount > 0) {
-    int barWidth = TFT_WIDTH - 40;
-    int barHeight = 15;
-    int barY = y + 10;
-
-    tft.setTextColor(TFT_COLOR_TEXT, TFT_COLOR_BG);
-    tft.setCursor(10, y);
-    tft.print("Signal Quality:");
-
-    tft.drawRect(20, barY, barWidth, barHeight, TFT_COLOR_TEXT);
-
-    uint16_t fillColor = satCount >= 4 ? TFT_COLOR_VALUE : TFT_COLOR_WARNING;
-    int fillWidth = (satCount * barWidth) / 12;
-    if (fillWidth > barWidth) fillWidth = barWidth;
-    tft.fillRect(21, barY + 1, fillWidth, barHeight - 2, fillColor);
-
-    y += lineHeight * 2;
-  }
-
+  // HDOP
+  tft.setTextColor(TFT_COLOR_TEXT, TFT_COLOR_BG);
   String hdop = gps.hdop.isValid() ? String(gps.hdop.hdop(), 2) : "--";
-  tft.setTextColor(TFT_COLOR_TEXT, TFT_COLOR_BG);
-  tft.setCursor(10, y);
-  tft.print("HDOP:");
+  tft.setCursor(5, y); tft.print("HDOP:");
   tft.setTextColor(TFT_COLOR_VALUE, TFT_COLOR_BG);
-  tft.setCursor(140, y);
-  tft.print(hdop);
-  y += lineHeight;
+  tft.setCursor(80, y); tft.print(hdop);
+  y += TFT_LINE_HEIGHT;
 
-  tft.setTextColor(TFT_COLOR_TEXT, TFT_COLOR_BG);
+  // Signal Quality Bar
+  tft.setCursor(5, y);
+  tft.print("Signal Quality:");
+  y += TFT_LINE_HEIGHT;
+
+  int barWidth = TFT_WIDTH - 20; // 10px padding on each side for the bar
+  int barHeight = 20; // Height of the bar
+  int barX = 10; // X position of the bar
+
+  tft.drawRect(barX, y, barWidth, barHeight, TFT_COLOR_TEXT);
+  uint16_t fillColor = satCount >= 4 ? TFT_COLOR_VALUE : TFT_COLOR_WARNING;
+  int fillWidth = (satCount * (barWidth - 2)) / 12; // Max 12 sats for full bar
+  if (fillWidth > barWidth - 2) fillWidth = barWidth - 2;
+  tft.fillRect(barX + 1, y + 1, fillWidth, barHeight - 2, fillColor);
+  y += barHeight + 5; // Move past the bar with some padding
+
+  // Fix Time
   bool hasFix = gps.location.isValid() && gps.location.age() < GPS_TIMEOUT;
   if (hasFix) {
     unsigned long fixDuration = (millis() - gpsFixAcquiredTime) / 1000;
     char fixStr[32];
     sprintf(fixStr, "%lum %lus", fixDuration / 60, fixDuration % 60);
-    tft.setCursor(10, y);
+    tft.setCursor(5, y); // Label
     tft.print("Fix Time:");
-    tft.setTextColor(TFT_COLOR_VALUE, TFT_COLOR_BG);
-    tft.setCursor(10, y + lineHeight);
+    tft.setTextColor(TFT_COLOR_VALUE, TFT_COLOR_BG); // Value color
+    tft.setCursor(5, y + TFT_LINE_HEIGHT); // Value on next line
     tft.print(fixStr);
   } else {
-    tft.setTextColor(TFT_COLOR_ERROR, TFT_COLOR_BG);
-    tft.setCursor(10, y);
-    tft.print("Searching for");
-    tft.setCursor(10, y + lineHeight);
-    tft.print("satellites...");
+    tft.setTextColor(TFT_COLOR_ERROR, TFT_COLOR_BG); // Error color
+    tft.setCursor(5, y);
+    tft.print("Searching for fix...");
   }
 }
 

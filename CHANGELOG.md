@@ -5,6 +5,36 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.7.3] - 2024-05-27
+
+### Changed
+- Adjusted TFT header layout for better visual balance:
+  - Centered the GPS status below the main title.
+  - Moved the IP address down and kept it right-aligned.
+## [1.7.2] - 2024-05-27
+
+### Fixed
+- Corrected display issues on "DIAGNOSTICS" and "SATELLITES" pages.
+- Applied increased font size (size 2) and reorganized data layout for improved readability on these pages.
+- Updated project version to 1.7.2.
+
+## [1.7.1] - 2024-05-27
+
+### Changed
+- Increased font size for data on all TFT pages to size 2 for improved readability.
+- Reorganized data layout on all pages to accommodate the larger font size.
+- Corrected implementation of header height reduction to 60px.
+- Updated project version to 1.7.1.
+
+## [1.7.0] - 2024-05-27
+
+### Changed
+- Reduced TFT header height to 60px to free up space for data.
+- Increased font size for page titles.
+- Reorganized data on TFT pages (GPS Data, Diagnostics, Satellites) for better readability with increased line spacing.
+- Moved GPS Model from header to Diagnostics page.
+- Moved UTC Time/Date from GPS Data page to Diagnostics page.
+
 ## [1.2.10] - 2025-11-19
 
 ### Changed
